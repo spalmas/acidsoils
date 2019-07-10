@@ -20,16 +20,21 @@ library(tidyverse)
 
 ```{r reading, message=FALSE}
   
-crop <- jsonlite::fromJSON('/home/sp/GitHub/acidsoils/Data/crop_bycountry.geojson' )
+crop <- jsonlite::fromJSON('../Data/croparea_bycountry.geojson' )
 crop <- crop$features$properties %>% 
-  mutate(cropland_ha = sum/100) %>% # dividedby 100 because scale of copernicus was 0-100 (percentage, not proportion)
-  select(country_co, cropland_ha) 
-  
-acidcrop <- jsonlite::fromJSON('/home/sp/GitHub/acidsoils/Data/acidcrop_bycountry.geojson' ) %>%
+  mutate(croparea_km = sum/100/1000000) %>% # dividedby 100 because scale of copernicus was 0-100 (percentage, not proportion) #/1000000 from m2 to km2
+  select(country_co, croparea_km) 
+
+acidcrop <- jsonlite::fromJSON('../Data/acidcroparea_bycountry.geojson' )
+acidcrop <- acidcrop$features$properties %>% 
   select(country_co, sum) %>% 
-  full_join(crop, by = 'cropland') %>% 
-  mutate(acidcrop_km = sum/100,
-         perc_acidcrop = acidcrop_ha / crop_ha)  # to vonvert to km2
+  full_join(crop, by = 'country_co') %>% 
+  mutate(acidcroparea_km = sum/100/1000000,
+         acidcroparea_crop = acidcroparea_km / croparea_km) %>%   # to vonvert to km2
+  select(-sum)
+
+
+head(acidcrop)
 ```
 
 ## 12 Countries with the highest estimated cropland area under acid soils 
