@@ -1,0 +1,59 @@
+---
+title: "Estimating acid soil distribution in cropland at the continental scale."
+author: "Sebastian Palmas"
+date: "2019-07-010"
+output: pdf_document
+---
+
+# Acid soils
+
+With the help of [Google Earth Engine (GEE)](https://earthengine.google.com/) we can analyze any continental spatial data in seconds.
+
+This code below estiamtes the amount of cropland with an estimated high acidity (pH < 5.6). It then summarises the results by country.
+
+* We are using USGS-NASA cropland mask. We plan to update it to the [Copernicus Global Land Cover](http://lcviewer.vito.be/).
+* We use africasoils pH prediction for the continent.
+```{r packages, message=FALSE}
+library(ggplot2)
+library(tidyverse)
+```
+
+```{r reading, message=FALSE}
+  
+crop <- jsonlite::fromJSON('/home/sp/GitHub/acidsoils/Data/crop_bycountry.geojson' )
+crop <- crop$features$properties %>% 
+  mutate(cropland_ha = sum/100) %>% # dividedby 100 because scale of copernicus was 0-100 (percentage, not proportion)
+  select(country_co, cropland_ha) 
+  
+acidcrop <- jsonlite::fromJSON('/home/sp/GitHub/acidsoils/Data/acidcrop_bycountry.geojson' ) %>%
+  select(country_co, sum) %>% 
+  full_join(crop, by = 'cropland') %>% 
+  mutate(acidcrop_km = sum/100,
+         perc_acidcrop = acidcrop_ha / crop_ha)  # to vonvert to km2
+```
+
+## 12 Countries with the highest estimated cropland area under acid soils 
+
+```{r plot1, echo = FALSE, message=FALSE}
+p2 <- ggplot(acidsoils %>% filter(count > 5000), aes(x = reorder(abbreviati, -acid_cropland), y = acid_cropland)) +
+  geom_bar(stat = "identity") +
+  ylab('Cropland area with high acidity (km2)') +
+  theme(axis.text.x = element_text(angle = 90))+
+  xlab('Country')
+p2
+```
+
+## Percentage of country cropland under high acidiry
+```{r perc, echo = FALSE}
+p2 <- ggplot(acidsoils %>% filter(perc_acid_cropland > .1), aes(x = reorder(abbreviati, -perc_acid_cropland), y = perc_acid_cropland)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = scales::percent) +
+  theme(axis.text.x = element_text(angle = 90))+
+  ylab('Percertage of country cropland high acidity (%)') + xlab('Country')
+p2
+```
+
+# Applications
+* Estimate the amount of inputs required to increase pH to a certain level.
+* With data on limestone production locations, we can estimate the cost of taking it to the farms,
+* Make an analysis of prioritization of areas to increase yields.
