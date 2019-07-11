@@ -18,27 +18,77 @@ library(ggplot2)
 library(tidyverse)
 ```
 
+## Crop areas
 ```{r reading, message=FALSE}
   
-crop <- jsonlite::fromJSON('../Data/croparea_bycountry.geojson' )
-crop <- crop$features$properties %>% 
+#to solve some issues, the Koualou Area (UU), Halaib Triangle (SU) and the Halaib Triangle (UU) are ommited in the results
+disputed <- c('UU', 'SU')
+
+json <- jsonlite::fromJSON('../Data/croparea_bycountry.geojson' )
+crop <- json$features$properties %>% 
   mutate(croparea_km = sum/100/1000000) %>% # dividedby 100 because scale of copernicus was 0-100 (percentage, not proportion) #/1000000 from m2 to km2
-  select(country_co, croparea_km) 
+  select(country_co, country_na, croparea_km) %>% 
+  filter(!country_co %in% disputed)
 
-acidcrop <- jsonlite::fromJSON('../Data/acidcroparea_bycountry.geojson' )
-acidcrop <- acidcrop$features$properties %>% 
+json <- jsonlite::fromJSON('../Data/acidcroparea_bycountry.geojson' )
+acidcrop <- json$features$properties %>% 
   select(country_co, sum) %>% 
-  full_join(crop, by = 'country_co') %>% 
+  full_join(crop, by = 'country_co') %>%
   mutate(acidcroparea_km = sum/100/1000000,
-         acidcroparea_crop = acidcroparea_km / croparea_km) %>%   # to vonvert to km2
-  select(-sum)
+         propacidcroparea = acidcroparea_km / croparea_km,
+         ) %>% 
+  select(-sum) %>% 
+  filter(!country_co %in% disputed)
 
-
-head(acidcrop)
 ```
 
-## 12 Countries with the highest estimated cropland area under acid soils 
+## Population analysis
+```{r population}
+json <- jsonlite::fromJSON('../Data/popcrop_bycountry.geojson' )
+popcrop <- json$features$properties %>% 
+  mutate(pop_cropland = sum) %>% 
+  select(country_co, pop_cropland)  %>% 
+  filter(!country_co %in% disputed)
 
+json <- jsonlite::fromJSON('../Data/popacidcrop_bycountry.geojson' )
+popacidcrop <- json$features$properties %>% 
+  mutate(pop_acidcropland = sum) %>% 
+  select(country_co, pop_acidcropland)  %>% 
+  filter(!country_co %in% disputed)
+
+json <- jsonlite::fromJSON('../Data/meanpopacidcrop_bycountry.geojson' )
+meanpopacidcrop <- json$features$properties %>% 
+  mutate(densitypop_acidcropland = mean) %>% 
+  select(country_co, densitypop_acidcropland)  %>% 
+  filter(!country_co %in% disputed)
+
+###Join all tables
+results <- acidcrop %>% 
+  full_join(popcrop, by = 'country_co') %>%
+  full_join(popacidcrop, by = 'country_co') %>% 
+  full_join(meanpopacidcrop, by = 'country_co')
+
+```
+
+## Computing some new columns
+```{r newcolumns}
+library(countrycode)
+results <- results %>% 
+  mutate(country_co = countrycode(country_co, "fips", "iso2c"))
+
+#country code of South Sudan not in countrycode package
+results$country_co[results$country_na == 'South Sudan'] <- 'SS'
+```
+
+Export the table to a csv
+```{r export}
+results$propacidcroparea[is.nan(results$propacidcroparea)] <- NA
+write_csv(results, '../Data/acidsoils_bycountry.csv', '')
+```
+
+
+
+## 12 Countries with the highest estimated cropland area under acid soils 
 ```{r plot1, echo = FALSE, message=FALSE}
 p2 <- ggplot(acidsoils %>% filter(count > 5000), aes(x = reorder(abbreviati, -acid_cropland), y = acid_cropland)) +
   geom_bar(stat = "identity") +
