@@ -1,9 +1,24 @@
 ---
 title: "Estimating acid soil distribution in cropland at the continental scale."
 author: "Sebastian Palmas"
-date: "2019-07-010"
+date: "2019-07-24"
 output: pdf_document
 ---
+
+```{r packages, message=FALSE}
+library(ggplot2)
+library(tidyverse)
+```
+
+
+```{r, engine = 'bash', echo = F, eval = FALSE}
+
+#7z l ~/Downloads/acidsoils-20190723T082159Z-001.zip  #list files
+#7z x -aoa	~/Downloads/acidsoils-20190723T082159Z-001.zip Data/
+7z x -aoa	~/Downloads/acidsoils-20190723T082159Z-001.zip Data/
+
+```
+
 
 # Acid soils
 
@@ -24,13 +39,13 @@ library(tidyverse)
 #to solve some issues, the Koualou Area (UU), Halaib Triangle (SU) and the Halaib Triangle (UU) are ommited in the results
 disputed <- c('UU', 'SU')
 
-json <- jsonlite::fromJSON('../Data/croparea_bycountry.geojson' )
+json <- jsonlite::fromJSON('../Data/croparea_bycountry.geojson')
 crop <- json$features$properties %>% 
   mutate(croparea_km = sum/100/1000000) %>% # dividedby 100 because scale of copernicus was 0-100 (percentage, not proportion) #/1000000 from m2 to km2
   select(country_co, country_na, croparea_km) %>% 
   filter(!country_co %in% disputed)
 
-json <- jsonlite::fromJSON('../Data/acidcroparea_bycountry.geojson' )
+json <- jsonlite::fromJSON('../Data/acidcroparea_bycountry.geojson')
 acidcrop <- json$features$properties %>% 
   select(country_co, sum) %>% 
   full_join(crop, by = 'country_co') %>%
@@ -44,6 +59,12 @@ acidcrop <- json$features$properties %>%
 
 ## Population analysis
 ```{r population}
+json <- jsonlite::fromJSON('../Data/pop_bycountry.geojson' )
+pop <- json$features$properties %>% 
+  mutate(pop = sum) %>% 
+  select(country_co, pop)  %>% 
+  filter(!country_co %in% disputed)
+
 json <- jsonlite::fromJSON('../Data/popcrop_bycountry.geojson' )
 popcrop <- json$features$properties %>% 
   mutate(pop_cropland = sum) %>% 
@@ -63,7 +84,8 @@ meanpopacidcrop <- json$features$properties %>%
   filter(!country_co %in% disputed)
 
 ###Join all tables
-results <- acidcrop %>% 
+acidsoils <- acidcrop %>% 
+  full_join(pop, by = 'country_co') %>%
   full_join(popcrop, by = 'country_co') %>%
   full_join(popacidcrop, by = 'country_co') %>% 
   full_join(meanpopacidcrop, by = 'country_co')
@@ -73,24 +95,23 @@ results <- acidcrop %>%
 ## Computing some new columns
 ```{r newcolumns}
 library(countrycode)
-results <- results %>% 
+acidsoils <- acidsoils %>% 
   mutate(country_co = countrycode(country_co, "fips", "iso2c"))
 
 #country code of South Sudan not in countrycode package
-results$country_co[results$country_na == 'South Sudan'] <- 'SS'
+acidsoils$country_co[acidsoils$country_na == 'South Sudan'] <- 'SS'
+
+#export values to a csv
+acidsoils$propacidcroparea[is.nan(acidsoils$propacidcroparea)] <- NA
+write_csv(acidsoils, '../Data/acidsoils_bycountry.csv', '')
+head(acidsoils)
+
 ```
 
-Export the table to a csv
-```{r export}
-results$propacidcroparea[is.nan(results$propacidcroparea)] <- NA
-write_csv(results, '../Data/acidsoils_bycountry.csv', '')
-```
 
-
-
-## 12 Countries with the highest estimated cropland area under acid soils 
+## Countries arranged by the estimated cropland area under acid soils 
 ```{r plot1, echo = FALSE, message=FALSE}
-p2 <- ggplot(acidsoils %>% filter(count > 5000), aes(x = reorder(abbreviati, -acid_cropland), y = acid_cropland)) +
+p2 <- ggplot(acidsoils %>% filter(acidcroparea_km > 0), aes(x = reorder(country_na, -acidcroparea_km), y = acidcroparea_km)) +
   geom_bar(stat = "identity") +
   ylab('Cropland area with high acidity (km2)') +
   theme(axis.text.x = element_text(angle = 90))+
@@ -100,7 +121,7 @@ p2
 
 ## Percentage of country cropland under high acidiry
 ```{r perc, echo = FALSE}
-p2 <- ggplot(acidsoils %>% filter(perc_acid_cropland > .1), aes(x = reorder(abbreviati, -perc_acid_cropland), y = perc_acid_cropland)) +
+p2 <- ggplot(acidsoils %>% filter(propacidcroparea > 0), aes(x = reorder(country_na, -propacidcroparea), y = propacidcroparea)) +
   geom_bar(stat = "identity") +
   scale_y_continuous(labels = scales::percent) +
   theme(axis.text.x = element_text(angle = 90))+
