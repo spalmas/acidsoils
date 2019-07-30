@@ -1,11 +1,12 @@
 ---
 title: "Estimating acid soil distribution in cropland at the continental scale."
 author: "Sebastian Palmas"
-date: "2019-07-24"
+date: "2019-07-27"
 output: pdf_document
 ---
 
 ```{r packages, message=FALSE}
+library(countrycode)
 library(ggplot2)
 library(tidyverse)
 ```
@@ -26,62 +27,76 @@ With the help of [Google Earth Engine (GEE)](https://earthengine.google.com/) we
 
 This code below estiamtes the amount of cropland with an estimated high acidity (pH < 5.6). It then summarises the results by country.
 
-* We are using USGS-NASA cropland mask. We plan to update it to the [Copernicus Global Land Cover](http://lcviewer.vito.be/).
+* We are using [CCI LAND COVER - S2 PROTOTYPE LAND COVER 20M MAP OF AFRICA 2016Copernicus Global Land Cover](http://2016africalandcover20m.esrin.esa.int/).
+
 * We use africasoils pH prediction for the continent.
-```{r packages, message=FALSE}
-library(ggplot2)
-library(tidyverse)
+
+## LULC
+```{r LULC, message=FALSE}
+#I also remove Cabo Verde since it is not included in the LULC data
+#to solve some issues, the Koualou Area (UU), Halaib Triangle (SU) and the Halaib Triangle (UU) are ommited in the results
+countries_to_omit<- c('CV', 'UU', 'SU')
+
+json <- jsonlite::fromJSON('../Data/GeoJSON/SSA_LULC_Histogram.geojson')
+LULC <- json$features$properties$histogram %>%  `/` (1000000) %>% `*` (20^2)   #Original data in pixels (of 20^2 m2), *20^2 to convert to m2, and /1000000 to convert to km2
+LULC <- cbind(json$features$properties$country_co, json$features$properties$country_na,  LULC)
+
+#LULC_classes <- read_delim('../Data/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0/ESACCI-LC_S2_Prototype_ColorLegend.csv', delim = ';')
+colnames(LULC) <- c('country_co','country_na', 'Tree cover areas','Open Water',
+                    'Shrubs cover areas','NA','Grassland','Cropland',
+                    'Vegetation aquatic or regularly flooded', 'Lichens Mosses / Sparse vegetation','Bare areas','Built up areas')
+
+write_csv(LULC[,-6], path = '../Results/LULC.csv')
+
 ```
 
 ## Crop areas
-```{r reading, message=FALSE}
-  
-#to solve some issues, the Koualou Area (UU), Halaib Triangle (SU) and the Halaib Triangle (UU) are ommited in the results
-disputed <- c('UU', 'SU')
+This is the analysis of the raster where all pixels were multiplied by pixel area. Therefore the area measure here is more precise than the one above.
 
-json <- jsonlite::fromJSON('../Data/croparea_bycountry.geojson')
+```{r }
+json <- jsonlite::fromJSON('../Data/GeoJSON/croparea_bycountry.geojson')
 crop <- json$features$properties %>% 
-  mutate(croparea_km = sum/100/1000000) %>% # dividedby 100 because scale of copernicus was 0-100 (percentage, not proportion) #/1000000 from m2 to km2
+  mutate(croparea_km = sum/1000000) %>% #/1000000 from m2 to km2
   select(country_co, country_na, croparea_km) %>% 
-  filter(!country_co %in% disputed)
+  filter(!country_co %in% countries_to_omit)
 
-json <- jsonlite::fromJSON('../Data/acidcroparea_bycountry.geojson')
+json <- jsonlite::fromJSON('../Data/GeoJSON/acidcroparea_bycountry.geojson')
 acidcrop <- json$features$properties %>% 
   select(country_co, sum) %>% 
   full_join(crop, by = 'country_co') %>%
-  mutate(acidcroparea_km = sum/100/1000000,
+  mutate(acidcroparea_km = sum/1000000,
          propacidcroparea = acidcroparea_km / croparea_km,
          ) %>% 
   select(-sum) %>% 
-  filter(!country_co %in% disputed)
+  filter(!country_co %in% countries_to_omit)
 
 ```
 
 ## Population analysis
 ```{r population}
-json <- jsonlite::fromJSON('../Data/pop_bycountry.geojson' )
+json <- jsonlite::fromJSON('../Data/GeoJSON/pop_bycountry.geojson' )
 pop <- json$features$properties %>% 
   mutate(pop = sum) %>% 
   select(country_co, pop)  %>% 
-  filter(!country_co %in% disputed)
+  filter(!country_co %in% countries_to_omit)
 
-json <- jsonlite::fromJSON('../Data/popcrop_bycountry.geojson' )
+json <- jsonlite::fromJSON('../Data/GeoJSON/popcrop_bycountry.geojson' )
 popcrop <- json$features$properties %>% 
   mutate(pop_cropland = sum) %>% 
   select(country_co, pop_cropland)  %>% 
-  filter(!country_co %in% disputed)
+  filter(!country_co %in% countries_to_omit)
 
-json <- jsonlite::fromJSON('../Data/popacidcrop_bycountry.geojson' )
+json <- jsonlite::fromJSON('../Data/GeoJSON/popacidcrop_bycountry.geojson' )
 popacidcrop <- json$features$properties %>% 
   mutate(pop_acidcropland = sum) %>% 
   select(country_co, pop_acidcropland)  %>% 
-  filter(!country_co %in% disputed)
+  filter(!country_co %in% countries_to_omit)
 
-json <- jsonlite::fromJSON('../Data/meanpopacidcrop_bycountry.geojson' )
+json <- jsonlite::fromJSON('../Data/GeoJSON/meanpopacidcrop_bycountry.geojson' )
 meanpopacidcrop <- json$features$properties %>% 
   mutate(densitypop_acidcropland = mean) %>% 
   select(country_co, densitypop_acidcropland)  %>% 
-  filter(!country_co %in% disputed)
+  filter(!country_co %in% countries_to_omit)
 
 ###Join all tables
 acidsoils <- acidcrop %>% 
@@ -94,7 +109,6 @@ acidsoils <- acidcrop %>%
 
 ## Computing some new columns
 ```{r newcolumns}
-library(countrycode)
 acidsoils <- acidsoils %>% 
   mutate(country_co = countrycode(country_co, "fips", "iso2c"))
 
@@ -103,7 +117,7 @@ acidsoils$country_co[acidsoils$country_na == 'South Sudan'] <- 'SS'
 
 #export values to a csv
 acidsoils$propacidcroparea[is.nan(acidsoils$propacidcroparea)] <- NA
-write_csv(acidsoils, '../Data/acidsoils_bycountry.csv', '')
+write_csv(acidsoils, '../Results/acidsoils_bycountry.csv', '')
 head(acidsoils)
 
 ```
