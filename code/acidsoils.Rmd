@@ -35,11 +35,12 @@ This code below estiamtes the amount of cropland with an estimated high acidity 
 ```{r LULC, message=FALSE}
 #I also remove Cabo Verde since it is not included in the LULC data
 #to solve some issues, the Koualou Area (UU), Halaib Triangle (SU) and the Halaib Triangle (UU) are ommited in the results
-countries_to_omit<- c('CV', 'UU', 'SU')
+#countries_to_omit<- c('CV', 'UU')
 
 json <- jsonlite::fromJSON('../Data/GeoJSON/SSA_LULC_Histogram.geojson')
 LULC <- json$features$properties$histogram %>%  `/` (1000000) %>% `*` (20^2)   #Original data in pixels (of 20^2 m2), *20^2 to convert to m2, and /1000000 to convert to km2
-LULC <- cbind(json$features$properties$country_co, json$features$properties$country_na,  LULC)
+LULC <- cbind(json$features$properties$country_co, json$features$properties$country_na,  LULC) %>% 
+  filter(!country_co %in% countries_to_omit)
 
 #LULC_classes <- read_delim('../Data/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0/ESACCI-LC_S2_Prototype_ColorLegend.csv', delim = ';')
 colnames(LULC) <- c('country_co','country_na', 'Tree cover areas','Open Water',
@@ -50,74 +51,69 @@ write_csv(LULC[,-6], path = '../Results/LULC.csv')
 
 ```
 
-## Crop areas
-This is the analysis of the raster where all pixels were multiplied by pixel area. Therefore the area measure here is more precise than the one above.
-
+## Crop areas by pH classes
+This makes a table of the crop areas by pH classes by country. Its in long format for easy use in ggplot later
 ```{r }
-json <- jsonlite::fromJSON('../Data/GeoJSON/croparea_bycountry.geojson')
-crop <- json$features$properties %>% 
-  mutate(croparea_km = sum/1000000) %>% #/1000000 from m2 to km2
-  select(country_co, country_na, croparea_km) %>% 
-  filter(!country_co %in% countries_to_omit)
+#Croland area under different ph classes 
+json <- jsonlite::fromJSON('../Data/GeoJSON/ph_class_bands_table.geojson')
+cropareas <- json$features$properties %>% 
+  select(country_co, ph_class0, ph_class1, ph_class2, ph_class3, ph_class4)
 
-json <- jsonlite::fromJSON('../Data/GeoJSON/acidcroparea_bycountry.geojson')
-acidcrop <- json$features$properties %>% 
-  select(country_co, sum) %>% 
-  full_join(crop, by = 'country_co') %>%
-  mutate(acidcroparea_km = sum/1000000,
-         propacidcroparea = acidcroparea_km / croparea_km,
-         ) %>% 
-  select(-sum) %>% 
-  filter(!country_co %in% countries_to_omit)
+#calculating SSA total
+SSAsum <- cropareas[,2:6] %>% colSums()  
+cropareas <- cropareas %>% rbind(c(NA, SSAsum)) #adding values to table
+cropareas$country_co[nrow(cropareas)] <- "SSA"  #adding SSA to country_co
+
+cropareas <- cropareas %>% 
+  gather(key = "ph_class", value = "area_km", -country_co) %>% 
+  mutate(ph_class = factor(ph_class),
+    area_km = round(area_km/1000000))
+str(cropareas)
+#save table to rds to use for shiny app
+saveRDS(cropareas, 'C:/Users/S.PALMAS/source/repos/spalmas/acidsoils-explorer/data/cropareas.rds')
+write.csv(cropareas, 'D:/OneDrive - CGIAR/AcidSoils/Results/cropareas.csv')
 
 ```
 
 ## Population analysis
 ```{r population}
-json <- jsonlite::fromJSON('../Data/GeoJSON/pop_bycountry.geojson' )
+json <- jsonlite::fromJSON('../Data/GeoJSON/pop_class_bands_table.geojson' )
 pop <- json$features$properties %>% 
-  mutate(pop = sum) %>% 
-  select(country_co, pop)  %>% 
-  filter(!country_co %in% countries_to_omit)
+  select(country_co, SSApop, pop_class0, pop_class1, pop_class2, pop_class3, pop_class4) 
 
-json <- jsonlite::fromJSON('../Data/GeoJSON/popcrop_bycountry.geojson' )
-popcrop <- json$features$properties %>% 
-  mutate(pop_cropland = sum) %>% 
-  select(country_co, pop_cropland)  %>% 
-  filter(!country_co %in% countries_to_omit)
+#calculating SSA total
+SSAsum <- pop[,2:7] %>% colSums()  
+pop <- pop %>% rbind(c(NA, SSAsum)) #adding values to table
+pop$country_co[nrow(pop)] <- "SSA"  #adding SSA to country_co
 
-json <- jsonlite::fromJSON('../Data/GeoJSON/popacidcrop_bycountry.geojson' )
-popacidcrop <- json$features$properties %>% 
-  mutate(pop_acidcropland = sum) %>% 
-  select(country_co, pop_acidcropland)  %>% 
-  filter(!country_co %in% countries_to_omit)
+#population table for Cristina
+popcsv <- pop %>%
+  mutate(pop2020 = round(SSApop),
+         ruralpop2020 = round(pop_class0 + pop_class1 + pop_class2 + pop_class3 + pop_class4),
+         country.name = countrycode(country_co, origin = "fips", destination = "country.name")) %>% 
+  select(country_co, country.name, pop2020, ruralpop2020)
+popcsv$country.name[popcsv$country_co == "OD"] <- "South Sudan"
+popcsv$country.name[popcsv$country_co == "SSA"] <- "SubSaharan Africa"
+popcsv[1:(nrow(popcsv)-1),] <- popcsv[popcsv$country.name[1:(nrow(popcsv)-1)] %>% order,] #reorder by country names
 
-json <- jsonlite::fromJSON('../Data/GeoJSON/meanpopacidcrop_bycountry.geojson' )
-meanpopacidcrop <- json$features$properties %>% 
-  mutate(densitypop_acidcropland = mean) %>% 
-  select(country_co, densitypop_acidcropland)  %>% 
-  filter(!country_co %in% countries_to_omit)
+write_csv(popcsv, "D:/OneDrive - CGIAR/AcidSoils/Results/population.csv")
 
-###Join all tables
-acidsoils <- acidcrop %>% 
-  full_join(pop, by = 'country_co') %>%
-  full_join(popcrop, by = 'country_co') %>%
-  full_join(popacidcrop, by = 'country_co') %>% 
-  full_join(meanpopacidcrop, by = 'country_co')
+pop <- pop %>% 
+  gather(key = "ph_class", value = "population", -country_co) %>% 
+  mutate(ph_class = factor(ph_class))
+str(pop)
+#save table to rds to use for shiny app
+saveRDS(pop, 'C:/Users/S.PALMAS/source/repos/spalmas/acidsoils-explorer/data/population.rds')
+
+
 
 ```
 
 ## Computing some new columns
 ```{r newcolumns}
-acidsoils <- acidsoils %>% 
-  mutate(country_co = countrycode(country_co, "fips", "iso2c"))
-
-#country code of South Sudan not in countrycode package
-acidsoils$country_co[acidsoils$country_na == 'South Sudan'] <- 'SS'
-
 #export values to a csv
 acidsoils$propacidcroparea[is.nan(acidsoils$propacidcroparea)] <- NA
-write_csv(acidsoils, '../Results/acidsoils_bycountry.csv', '')
+write_csv(acidsoils, '../Results/acidsoils_bycountry.csv')
 head(acidsoils)
 
 ```
@@ -140,6 +136,15 @@ p2 <- ggplot(acidsoils %>% filter(propacidcroparea > 0), aes(x = reorder(country
   scale_y_continuous(labels = scales::percent) +
   theme(axis.text.x = element_text(angle = 90))+
   ylab('Percertage of country cropland high acidity (%)') + xlab('Country')
+p2
+```
+
+## Rural Population living on acid soils
+```{r perc, echo = FALSE}
+p2 <- ggplot(acidsoils %>% filter(pop_acidcropland > 0), aes(x = reorder(country_na, -pop_acidcropland), y = pop_acidcropland)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90))+
+  ylab('Population living on acid soils') + xlab('Country')
 p2
 ```
 
