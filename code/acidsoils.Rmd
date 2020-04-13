@@ -1,35 +1,56 @@
 ---
 title: "Estimating acid soil distribution in cropland at the continental scale."
 author: "Sebastian Palmas"
-date: "2019-07-27"
+date: "2020-01-29"
 output: pdf_document
 ---
 
 ```{r packages, message=FALSE}
-library(countrycode)
-library(ggplot2)
+library(terra)
 library(tidyverse)
 ```
 
+# Acid soils
 
-```{r, engine = 'bash', echo = F, eval = FALSE}
+This code below estimates the amount of cropland of Barley, Maize and Rice under high acidity. It then summarises the results by country.
 
-#7z l ~/Downloads/acidsoils-20190723T082159Z-001.zip  #list files
-#7z x -aoa	~/Downloads/acidsoils-20190723T082159Z-001.zip Data/
-7z x -aoa	~/Downloads/acidsoils-20190723T082159Z-001.zip Data/
+* We are using SPAM 2010 v1.1 for the crop areas and production
+
+* We use africasoils pH prediction for the continent.
+
+## Croplands with acidity in
+```{r}
+json <- jsonlite::fromJSON("../data/GeoJSON/croparea_table.geojson")
+cropareaacid <- cbind(country_co=json$features$properties$country_co,
+                      country_na=json$features$properties$country_na) %>% as.data.frame()
+
+cropareaacid$CGLSLC100_croparea <- json$features$properties$sum %>% `/` (10000) # and /10000 to convert from m2 to to ha
+
+json <- jsonlite::fromJSON("../data/GeoJSON/croparea_acid_table.geojson")
+cropareaacid$CGLSLC100_croparea_acid <- json$features$properties$sum %>% `/` (10000) # and /10000 to convert from m2 to to ha
+
+json <- jsonlite::fromJSON("../data/GeoJSON/croparea_55_70_table.geojson")
+cropareaacid$CGLSLC100_croparea_55_70 <- json$features$properties$sum  %>% `/` (10000) # and /10000 to convert from m2 to to ha
+
+#Using C3S-LC-L4-LCCS
+json <- jsonlite::fromJSON("../data/GeoJSON/C3S_croparea_table.geojson")
+cropareaacid$C3S_croparea <- json$features$properties$sum %>% `/` (10000) # and /10000 to convert from m2 to to ha
+
+json <- jsonlite::fromJSON("../data/GeoJSON/C3S_croparea_acid_table.geojson")
+cropareaacid$C3S_croparea_acid <- json$features$properties$sum %>% `/` (10000) # and /10000 to convert from m2 to to ha
+
+json <- jsonlite::fromJSON("../data/GeoJSON/C3S_croparea_55_70_table.geojson")
+cropareaacid$C3S_croparea_55_70 <- json$features$properties$sum  %>% `/` (10000) # and /10000 to convert from m2 to to ha
+
+
+#print results
+print(cropareaacid)
+
+#Exporting to file
+write.table(cropareaacid, file="../output/acidsoils_bycountry/acidsoils_bycountry.csv", sep = ",", row.names = FALSE)
 
 ```
 
-
-# Acid soils
-
-With the help of [Google Earth Engine (GEE)](https://earthengine.google.com/) we can analyze any continental spatial data in seconds.
-
-This code below estiamtes the amount of cropland with an estimated high acidity (pH < 5.6). It then summarises the results by country.
-
-* We are using [CCI LAND COVER - S2 PROTOTYPE LAND COVER 20M MAP OF AFRICA 2016Copernicus Global Land Cover](http://2016africalandcover20m.esrin.esa.int/).
-
-* We use africasoils pH prediction for the continent.
 
 ## LULC
 ```{r LULC, message=FALSE}
@@ -39,8 +60,7 @@ This code below estiamtes the amount of cropland with an estimated high acidity 
 
 json <- jsonlite::fromJSON('../Data/GeoJSON/SSA_LULC_Histogram.geojson')
 LULC <- json$features$properties$histogram %>%  `/` (1000000) %>% `*` (20^2)   #Original data in pixels (of 20^2 m2), *20^2 to convert to m2, and /1000000 to convert to km2
-LULC <- cbind(json$features$properties$country_co, json$features$properties$country_na,  LULC) %>% 
-  filter(!country_co %in% countries_to_omit)
+LULC <- cbind(json$features$properties$country_co, json$features$properties$country_na,  LULC)
 
 #LULC_classes <- read_delim('../Data/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0/ESACCI-LC_S2_Prototype_ColorLegend.csv', delim = ';')
 colnames(LULC) <- c('country_co','country_na', 'Tree cover areas','Open Water',
