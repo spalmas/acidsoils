@@ -1,0 +1,271 @@
+---
+title: "Ensemble Prediction of Market Maize Prices in Ethiopia"
+author: "Sebastian Palmas"
+date:  "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE) 
+```
+
+# INTRODUCTION
+Maize price estimates covering a continuous geographical area are difficult to collect: It costs a lot and takes time to collect the data. Using the price of maize at known locations and the value of spatial variables at these locations, we can create a model for predicting maize prices. Given the values of the spatial variables, the model will consequently predict the price of maize in other locations.
+
+
+# SETUP
+
+The setup for this script is `ETH_maize_market_price_setup.Rmd`. In this file I create the calibration and validation datasets.
+
+## Packages
+We use the "sp", "raster" and "rgdal" R packages for creating and manipulating spatial data in this exercise. They are all add-on packages that have to be installed from CRAN.
+```{r, results = 'hide'}
+library(dplyr)
+library(ggplot2)
+library(rgdal)
+library(terra)
+
+source("../plot_fitness.R")
+```
+
+# I. LOADING DATASETS
+These are the tables of calibration and validation with all the response variables and covariates. Prepared `ETH_maize_market_price_setup.Rmd`.
+```{r}
+c.data <- read.csv("../../data/prices/maize_market_price_calibration.csv")
+v.data <- read.csv("../../data/prices/maize_market_price_validation.csv")
+```
+
+
+# II. FITTING INDIVIDUAL MODELS
+
+We will use an ensemble method to predict the market maize prices. The models in the ensemble method are
+
+* Stochastic Gradient boosting: from xgboost package
+* Neural network
+* PLS regression
+* Random forest: from ranger package
+* Regularized regression
+
+These are the packages needed for all the models:
+```{r, message = "hide"}
+library(caret)
+library(deepnet)
+library(gbm)
+library(glmnet)
+library(pls)
+library(randomForest)
+```
+
+## A) Stochastic gradient Boosting
+```{r, eval=FALSE}
+# Control setup
+set.seed(1234)
+tc <- trainControl(method = "cv", number=10)
+
+#Traning model
+model.gbm <- train(x = c.data[,2:43], y = c.data[,1], 
+                   method = "gbm", 
+                   preProc = c("center", "scale"),
+                   trControl = tc,
+                   tuneGrid = expand.grid(.n.trees=seq(50,500,by=50), 
+                                          .interaction.depth = 3,
+                                          .shrinkage = 0.1,
+                                          .n.minobsinnode = 100))
+
+print(model.gbm)
+```
+
+```{r, echo=FALSE, eval=FALSE}
+v.imp.gbm <- varImp(model.gbm)
+plot(v.imp.gbm, top=28)
+
+plot_fitness(obs = c.data[,1], pred = predict(model.gbm), name = "GBM")
+```
+
+## B) Neural network
+```{r, message=FALSE, warning=FALSE}
+set.seed(1234)
+tc <- trainControl(method = "cv", number = 10)
+
+#Traning model
+model.nn <- train(c.data[,2:43], c.data[,1], 
+                  method = "dnn", 
+                  preProc = c("center", "scale"), 
+                  trControl = tc,
+                  tuneGrid = expand.grid(layer1 = 2:6,
+                                         layer2 = 0:3,
+                                         layer3 = 0:3,
+                                         hidden_dropout = 0,
+                                         visible_dropout = 0))
+
+print(model.nn)
+```
+
+
+```{r, echo=FALSE}
+v.imp.nn <- varImp(model.nn)
+plot(v.imp.nn, top=28)
+```
+
+## C) PLS Regression
+```{r}
+set.seed(1234)
+tc <- trainControl(method = "cv", number = 10)
+
+#Traning model
+model.pls <- train(c.data[,2:43], c.data[,1], 
+                   method = "pls", 
+                   preProc = c("center", "scale"),
+                   tuneGrid = expand.grid(ncomp = 1:10),
+                   trControl = tc)
+
+print(model.pls)
+
+```
+
+```{r, echo=FALSE}
+v.imp.pls <- varImp(model.pls)
+plot(v.imp.pls, top=28)
+```
+
+## D) Random Forest
+### Tune The Forest
+By "tune the forest", we mean the process of determining the optimal number of variables to consider at each split in a decision-tree. Too many prediction variables and the algorithm will over-fit; too few prediction variables and the algorithm will under-fit. so first, we use `tuneRF` function to get the possible optimal numbers of prediction variables. The `tuneRF` function takes two arguments: the prediction variables and the response variable.
+
+```{r}
+# Control setup
+set.seed(1234)
+tc <- trainControl(method = "oob")
+
+#Traning model
+model.rf <- train(c.data[,2:43], c.data[,1], 
+                  method = "rf",
+                  preProc = c("center", "scale"),
+                  trControl = tc)
+
+print(model.rf)
+```
+
+```{r, echo=FALSE}
+v.imp.rf <- varImp(model.rf, useModel = FALSE)
+plot(v.imp.rf, top=28)
+```
+
+
+# III. ENSEMBLE FITTING
+The ensemble fitting is using the validation dataset because predictions on data that have been used for the training of the weak learners are not relevant for the training of the meta-model. 
+
+*I need to check the proportion used to divide calibration and validation datasets. Right now is 80-20%*
+
+```{r}
+c.data.ens <- data.frame(maip_USDkg = v.data[,1],
+                         maip_USDkg.nn = predict(model.nn, v.data),
+                         maip_USDkg.pls = predict(model.pls, v.data),
+                         maip_USDkg.rf = predict(model.rf, v.data))
+```
+
+Building the ensemble model using `glmnet`.
+
+```{r, message=FALSE}
+set.seed(1234)
+
+model.ens <- lm(maip_USDkg ~ maip_USDkg.nn+maip_USDkg.pls+maip_USDkg.rf,
+                   data = c.data.ens)
+
+#exporting model to rda to use later
+save(model.ens, file="../../output/models/market_price.rda")
+
+print(model.ens)
+```
+
+
+```{r, echo=FALSE}
+par(mfrow=c(2,2))
+plot_fitness(obs = c.data[,1], pred = predict(model.nn), name = "Cal: NN")
+plot_fitness(obs = c.data[,1], pred = predict(model.pls), name = "Cal: PLS")
+plot_fitness(obs = c.data[,1], pred = predict(model.rf), name = "Cal: Random Forest")
+plot_fitness(obs = v.data[,1], pred = predict(model.ens), name = "Cal: Ensemble")
+```
+
+
+# IV. MODEL VALIDATION
+
+We will use the validation dataset to check the prediction.
+
+## Prediction on validation dataset
+```{r}
+#Getting predictions on the validation datasets
+maip_USDkg.nn <- predict(model.nn, newdata = v.data)
+maip_USDkg.pls <- predict(model.pls, newdata = v.data)
+maip_USDkg.rf <- predict(model.rf, newdata = v.data)
+
+#Putting together ensemble results to a table
+v.data.ens <- data.frame(maip_USDkg.nn,
+                         maip_USDkg.pls,
+                         maip_USDkg.rf)
+
+#running ensemble model
+v.ens <- predict(model.ens, v.data.ens)
+```
+
+```{r, echo=FALSE}
+par(mfrow=c(2,2))
+plot_fitness(obs = v.data[,1], pred = maip_USDkg.nn, name = "Val: NN")
+plot_fitness(obs = v.data[,1], pred = maip_USDkg.pls, name = "Val: PLS")
+plot_fitness(obs = v.data[,1], pred = maip_USDkg.rf, name = "Val: Random Forest")
+plot_fitness(obs = v.data[,1], pred = v.ens, name = "Val: Ensemble")
+```
+
+
+# V. PRICE PREDICTION RASTERS
+```{r}
+rasterlist <- list.files(path = "F:/Work/MarkusStacks/ET_250m_2019/ET_500m_2019_resampled/", 
+                         pattern = "*.tif$", 
+                         full.names = TRUE) # Character vector of relative filepaths
+
+rasterstack <- rast(rasterlist)
+```
+
+```{r}
+#Running model predictions
+maip_USDkg.nn <- predict(rasterstack, model.nn,
+                         na.rm=TRUE, wopt = list(names = "maip_USDkg.nn"),
+                         filename="../../output/crop_market_price/ETH_maize_market_price_nn.tif", overwrite=TRUE)
+maip_USDkg.pls <- predict(rasterstack, model.pls,
+                          na.rm=TRUE, wopt = list(names = "maip_USDkg.pls"),
+                          filename="../../output/crop_market_price/ETH_maize_market_price_pls.tif", overwrite=TRUE)
+maip_USDkg.rf <- predict(rasterstack, model.rf,
+                         na.rm=TRUE, wopt = list(names = "maip_USDkg.rf"),
+                         filename="../../output/crop_market_price/ETH_maize_market_price_rf.tif", overwrite=TRUE)
+
+#library(terra)
+#library(glmnet)
+#load("../../output/models/market_price.rda")  #loading random forest model. `load` has less problems than `readRDS` that I think changes the file somehow
+#maip_USDkg.nn <- rast("../../output/crop_market_price/ETH_maize_market_price_nn.tif")
+#maip_USDkg.pls <- rast("../../output/crop_market_price/ETH_maize_market_price_pls.tif")
+#maip_USDkg.rf <- rast("../../output/crop_market_price/ETH_maize_market_price_rf.tif")
+
+#Putting together rasterstack for ensemble
+raster.data.ens <- rast(maip_USDkg.nn, maip_USDkg.pls, maip_USDkg.rf, nlyrs=3)
+names(raster.data.ens) <- c("maip_USDkg.nn", "maip_USDkg.pls", "maip_USDkg.rf")
+
+maip_USDkg.ens <- predict(raster.data.ens, model.ens, na.rm=TRUE)
+
+plot(maip_USDkg.ens, main = "Ensemble Market price prediction (USD/kg)")
+
+writeRaster(maip_USDkg.ens,
+            filename="../../output/crop_market_price/ETH_maize_market_price_ENS.tif", overwrite=TRUE)
+
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(maip_USDkg.nn, main="Neural Network")
+plot(maip_USDkg.pls, main="PLS")
+plot(maip_USDkg.rf, main="Random Forest")
+plot(raster.data.ens, main="Ensemble")
+```
+
