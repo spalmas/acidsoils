@@ -158,23 +158,22 @@ The raster files contain data on weather elements, soil properties and distance 
 |WPP17 | Population density prediction (2015) | [WorldPop](#http://www.worldpop.org.uk/data/get_data/)
 
 We create a raster object with all these layers. Some Markus files had slighly different projection and extent, I corrected these files in `prepare_rasters.sh`.
+
 ```{r}
 rasterlist <- list.files(path = "F:/Work/MarkusStacks/ET_250m_2019/ET_500m_2019_resampled/", 
                          pattern = "*.tif$", 
                          full.names = TRUE) # Character vector of relative filepaths
 
+#eliminate lat long rasters because coordinates where already in CSA dataset
+lat_raster <- grep("lat.tif", rasterlist)
+rasterlist <- rasterlist[-lat_raster]
+
+long_raster <- grep("long.tif", rasterlist)
+rasterlist <- rasterlist[-long_raster]
+
+
+#creating rasterstack
 rasterstack <- rast(rasterlist)
-```
-
-## 2) Creating rasterstack and extacting values
-Let's redo the rasterstack now with the lat long rasters
-```{r}
-rasterlist <- list.files(path = "F:/Work/MarkusStacks/ET_250m_2019/ET_500m_2019_resampled/", 
-                         pattern = "*.tif$", 
-                         full.names = TRUE) # Character vector of relative filepaths
-
-rasterstack <- rast(rasterlist)
-
 
 #extracting values within a raster
 CSA <- cbind(CSA,
@@ -273,11 +272,47 @@ CSA <- cbind(CSA, results)
 ```
 
 
-# IV. EXPORTING THE DATASET
-
-## 6) Exporting tables to files for reading
+# IV. SELECTING VARIABLES TO USE IN THE PREDICTION
 ```{r}
-write.csv(CSA, "../../data/prices/CSA_market_price_data.csv", row.names=FALSE)
+CSA_barley <- CSA %>% dplyr::select(
+  barley_unmilled_White,
+  Month, Longitude, Latitude,
+  BIO1, BIO12, BIO15, BIO7, CEC,
+  DCELL, DGRID, DNFPA, DOR1, DOR2, DOWS, DPOP1, DPOP2, DWRES,
+  EVI, LCS, LCT, LCU, LSTD, LSTN,
+  MB1, MB2, MB3, MB7, MDEM, NLT, NPPA, NPPS,
+  PARA, PARV, PH, S1VV, S2B08, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP,
+  belg_rainfall_seas, meher_barley_rainfall_seas, lagrainfall3, lagrainfall6)
+
+CSA_maize <- CSA %>% dplyr::select(
+  maize_Unmilled,
+  Month, Longitude, Latitude,
+  BIO1, BIO12, BIO15, BIO7, CEC,
+  DCELL, DGRID, DNFPA, DOR1, DOR2, DOWS, DPOP1, DPOP2, DWRES,
+  EVI, LCS, LCT, LCU, LSTD, LSTN,
+  MB1, MB2, MB3, MB7, MDEM, NLT, NPPA, NPPS,
+  PARA, PARV, PH, S1VV, S2B08, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP,
+  belg_rainfall_seas, meher_maize_rainfall_seas, lagrainfall3, lagrainfall6)
+
+CSA_wheat <- CSA %>% dplyr::select(
+  wheat_unmilled_White,
+  Month, Longitude, Latitude,
+  BIO1, BIO12, BIO15, BIO7, CEC,
+  DCELL, DGRID, DNFPA, DOR1, DOR2, DOWS, DPOP1, DPOP2, DWRES,
+  EVI, LCS, LCT, LCU, LSTD, LSTN,
+  MB1, MB2, MB3, MB7, MDEM, NLT, NPPA, NPPS,
+  PARA, PARV, PH, S1VV, S2B08, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP, 
+  belg_rainfall_seas, meher_wheat_rainfall_seas, lagrainfall3, lagrainfall6)
+
+```
+
+
+# V. EXPORTING THE DATASET
+
+```{r}
+write.csv(CSA_barley, "../../data/prices/CSA_barley_market_price_data.csv", row.names=FALSE)
+write.csv(CSA_maize, "../../data/prices/CSA_maize_market_price_data.csv", row.names=FALSE)
+write.csv(CSA_wheat, "../../data/prices/CSA_wheat_market_price_data.csv", row.names=FALSE)
 ```
 
 
