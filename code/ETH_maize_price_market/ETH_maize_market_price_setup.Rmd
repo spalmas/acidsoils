@@ -18,13 +18,87 @@ Setup for the ensemble prediction of maize market prices in Ethiopia. It creates
 
 ## Packages
 We use the "sp", "raster" and "rgdal" R packages for creating and manipulating spatial data in this exercise. They are all add-on packages that have to be installed from CRAN.
-```{r, results = 'hide'}
+```{r, message = FALSE}
+rm(list=ls()) 
 library(dplyr)
 library(rgdal)
 library(terra)
 ```
 
-# I. Preparing spatial covariates raterstack
+
+# I. PREPARING CSA DATA
+This data is made up of maize prices reported by CSA across Ethiopia in the 2014-2019. 
+
+This is the CSA raw data.
+
+```{r}
+CSA <- read.csv("F:/Work/Ethiopia/CSA_RetailPrice/CSA_RetailPrice_BarleyMaizeWheat_2013_19.csv")
+```
+
+## 1) Cleaning the data
+### Changing factors to numbers
+```{r}
+#Data has points instead of NAs
+CSA[CSA == "."] <- NA
+
+#Removing points without coordinates
+CSA <- CSA[!is.na(CSA$Longitude) & !is.na(CSA$Latitude),]
+
+#converting factor to numeric
+CSA$Longitude <- as.numeric(levels(CSA$Longitude))[CSA$Longitude]
+CSA$Latitude <- as.numeric(levels(CSA$Latitude))[CSA$Latitude]
+CSA$barley_unmilled_White <- as.numeric(levels(CSA$barley_unmilled_White))[CSA$barley_unmilled_White]
+CSA$maize_Unmilled <- as.numeric(levels(CSA$maize_Unmilled))[CSA$maize_Unmilled]
+CSA$wheat_unmilled_White <- as.numeric(levels(CSA$wheat_unmilled_White))[CSA$wheat_unmilled_White]
+```
+
+### Creating a date column
+```{r}
+months.name <- c("january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december")
+
+#creating month code number based on list above
+CSA$Month_code <- lubridate::month(match(CSA$Month, months.name))
+
+#creating column in date format
+CSA$Date <- as.Date(with(CSA, paste(Year, Month_code, 1,sep="-")), "%Y-%m-%d")
+```
+
+
+## 2) Creating spatial object from the CSA data
+
+Now that we have a dataset will full coordinates and prices, I'll create a shapefile to extract the values from the rasterstack.
+
+```{r}
+#creating spatial object with those coordinates
+CSA_vect <- vect(cbind(CSA$Longitude, CSA$Latitude), atts=CSA)
+
+# wgs84.prj: projection for coordinates in prices csv
+crs(CSA_vect) <- "+proj=longlat +datum=WGS84 +no_defs"
+```
+
+The raster files in the Markus stack use [Lambert azimuthal equal-area projection](https://en.wikipedia.org/wiki/Lambert_azimuthal_equal-area_projection), which better preserves areas and distances compared with the WGS84 projection. We transform the projection of the maize price shapefile to match this projection since it must share the same projection system with the rasters in any spatial process.
+
+```{r}
+#reading PH to use its projection
+PH <- rast("F:/Work/MarkusStacks/ET_250m_2019/ET_500m_2019_resampled/PH.tif")
+
+#Projecting the vector to this projection
+CSA_vect <- project(CSA_vect, PH)
+
+#export vector to use for predictions
+#writeVector(CSA_vect,
+#            filename = "../../data/prices/ETH_CSA_market_maize_prices_2016.shp",
+#            overwrite=TRUE)
+```
+
+```{r, echo=FALSE}
+ETH_adm <- vect("F:/Work/GADM/gadm36_levels_shp/gadm36_ETH_shp/gadm36_ETH_0.shp") %>% project(CSA_vect)
+plot(CSA_vect, pch = 20, col = "Red", main = "Locations With Known CSA Prices")
+lines(ETH_adm)
+```
+
+
+# II. PREPARING TIME-INVARIANT RASTERSTACK
 There are multiple spatial covariates. Weather, soil and amenities. Also we add latitude and longitude data.
 
 ## 1) Raster Data on Weather, Soil and Amenities
@@ -92,34 +166,7 @@ rasterlist <- list.files(path = "F:/Work/MarkusStacks/ET_250m_2019/ET_500m_2019_
 rasterstack <- rast(rasterlist)
 ```
 
-## 2) Add Latitude and Longitude Rasters
-We add longitude and latitude rasters to the stack so that our model considers location in its prediction. The longitude and latitude rasters will have the longitude values and latitude values respectively as the cell values. We use one raster from the stack created earlier as a reference, to ensure the latitude and longitude rasters have the same properties.
-
-Create the longitude and latitude rasters in 5 steps: convert the Tanzania's "level 0" shapefile -downloaded earlier- projection to the Lambert azimuthal equal-area projection; transform it to a raster with the reference raster's properties; extract the longitude and latitude values from the created raster; assign the longitude and latitude values to two copies of the created raster; name the raster cell values and add them to the rasters stack.
-
-This most likely can be done more efficiently with r.latlong in GRASS, but I couldn't make it work.
-
-```{r}
-#Extacting longitude and latitude values for each column and row
-longitudes <- xFromCol(rasterstack[[1]], 1:dim(rasterstack[[1]])[2]) 
-longitudes <- rep(longitudes, times = dim(rasterstack[[1]])[1])
-latitudes <- yFromRow(rasterstack[[1]], 1:dim(rasterstack[[1]])[1])
-latitudes <- rep(latitudes, times = dim(rasterstack[[1]])[2])
-latitudes <- sort(latitudes, decreasing=TRUE)
-
-#Creating the rasters and assigning the values
-natbnd.raster.long <- rasterstack[[1]]
-values(natbnd.raster.long) <- longitudes
-names(natbnd.raster.long) <- "Longitude"  #changing the name of the values
-writeRaster(natbnd.raster.long, filename = "F:/Work/MarkusStacks/ET_250m_2019/ET_500m_2019_resampled/long.tif", overwrite=TRUE)
-
-natbnd.raster.lat <- rasterstack[[1]]
-values(natbnd.raster.lat) <- latitudes
-names(natbnd.raster.lat) <- "Latitude"  #changing the name of the values
-writeRaster(natbnd.raster.lat, filename = "F:/Work/MarkusStacks/ET_250m_2019/ET_500m_2019_resampled/lat.tif", overwrite=TRUE)
-```
-
-## 3) Creating rasterstack
+## 2) Creating rasterstack and extacting values
 Let's redo the rasterstack now with the lat long rasters
 ```{r}
 rasterlist <- list.files(path = "F:/Work/MarkusStacks/ET_250m_2019/ET_500m_2019_resampled/", 
@@ -127,172 +174,110 @@ rasterlist <- list.files(path = "F:/Work/MarkusStacks/ET_250m_2019/ET_500m_2019_
                          full.names = TRUE) # Character vector of relative filepaths
 
 rasterstack <- rast(rasterlist)
-```
-
-
-# II. Preparing LSMS market price data
-This data is made up of maize prices collectted at various locations across Ethiopia in the 2015-2016 LSMS data. To create this shapefile, we 1) calculate prices in ETB/kg and correcting for the many inaccuracies found in LSMS. 2) Convert all prices to USD/kg using 2016 exchange rate. 3) joining coordinates and 4) creating and saving the shapefile.
-
-This is the LSMS raw data.
-```{r }
-LSMS <- read.csv("F:/Work/LSMS/ETH_2015_ESS_v03_M_CSV/Community/sect10a2_com_w3.csv")
-
-#Keeping only maize rows
-LSMS_maize <- LSMS %>%  filter(cs10a2q01 == "Maize")
-```
-
-## 1) Cleaning data and creating prices
-
-Getting the maize prices from the LSMS and correcting for mistakes in the survey. Finally, I convert the prices to USD/kg (using the exchange rate of 2016).
-```{r}
-table(LSMS_maize$cs10a2q03) #table of units reported in the survey
-
-hist(LSMS_maize$cs10a2q05, main="Histogram of prices reported (not considering units)")
-
-#let's remove all that do not have any price data
-LSMS_maize <- LSMS_maize %>% filter(!is.na(cs10a2q05))
-
-#there is one line without quantity. This is most likely 1 because of the price
-LSMS_maize$cs10a2q04[212] <- 1
-
-#there is another one that is probably the price for 100kg
-LSMS_maize$cs10a2q04[135] <- 100
-
-
-#Calculating prices per unit
-LSMS_maize <- LSMS_maize %>% 
-  mutate(maip_ETBkg = cs10a2q05/cs10a2q04)
-
-#Converting those that were reported in grams to kg 
-LSMS_maize$maip_ETBkg[LSMS_maize$cs10a2q03 == "Gram"] = LSMS_maize$cs10a2q05[LSMS_maize$cs10a2q03 == "Gram"] / (LSMS_maize$cs10a2q04[LSMS_maize$cs10a2q03 == "Gram"] / 1000)
-
-#Checking distribution of outliers
-hist(LSMS_maize$maip_ETBkg[LSMS_maize$maip_ETBkg < 2], main = "very low estimates")
-hist(LSMS_maize$maip_ETBkg[LSMS_maize$maip_ETBkg > 15], main = "very high estimates")
-
-#bring back those outliers to original calculation to see if they fit
-LSMS_maize$maip_ETBkg[LSMS_maize$maip_ETBkg < 2] <- LSMS_maize$cs10a2q05[LSMS_maize$maip_ETBkg < 2] / LSMS_maize$cs10a2q04[LSMS_maize$maip_ETBkg < 2]
-LSMS_maize$maip_ETBkg[LSMS_maize$maip_ETBkg > 15] <- LSMS_maize$cs10a2q05[LSMS_maize$maip_ETBkg > 15] / LSMS_maize$cs10a2q04[LSMS_maize$maip_ETBkg > 15]
-
-#Which lines are still outliers?
-LSMS_maize[(LSMS_maize$maip_ETBkg < 2 | LSMS_maize$maip_ETBkg > 15),]
-
-#these most likely reported the quantity in grams erroneously
-LSMS_maize$maip_ETBkg[(LSMS_maize$maip_ETBkg < 2 | LSMS_maize$maip_ETBkg > 15)] <- LSMS_maize$cs10a2q05[(LSMS_maize$maip_ETBkg < 2 | LSMS_maize$maip_ETBkg > 15)] / (LSMS_maize$cs10a2q04[(LSMS_maize$maip_ETBkg < 2 | LSMS_maize$maip_ETBkg > 15)]/1000)
-
-#Which lines are still outliers?
-LSMS_maize[(LSMS_maize$maip_ETBkg < 2 | LSMS_maize$maip_ETBkg > 15),]
-
-#Let's just remove these values
-LSMS_maize <- LSMS_maize %>% filter(maip_ETBkg > 2 & maip_ETBkg < 15)
-
-#Final distribution in ETB/kg
-hist(LSMS_maize$maip_ETBkg)
-
-```
-
-
-## 2) Convert all prices to USD
-Conversion from ETB to USD: 2016 exchange rate
-
-```{r}
-ETB_to_USD2016 <- 22.5053
-LSMS_maize$maip_USDkg <- LSMS_maize$maip_ETBkg/ETB_to_USD2016
-
-#Final distribution in USD/kg
-hist(LSMS_maize$maip_USDkg)
-```
-
-## 3) Joining coordiantes
-
-Now that we have the list, let's create a shapefile with these values by joining the coordinates found in the other table.
-
-Not all markets have coordinates (in fact only two have them). I'll use mean coordinate by community found in the HH survey as the coordinates for those prices.
-
-```{r }
-LSMS_coordinates <- read.csv("F:/Work/LSMS/ETH_2015_ESS_v03_M_CSV/Geovariables/ETH_HouseholdGeovars_y3.csv") %>% 
-  dplyr::select(ea_id2, lat_dd_mod, lon_dd_mod)
-
-#remove duplicated lines
-LSMS_coordinates <- LSMS_coordinates[!duplicated(LSMS_coordinates),]
-
-#keeping only the mean coordinates for each community
-LSMS_coordinates <- LSMS_coordinates %>% group_by(ea_id2) %>% 
-  summarize(lat = mean(lat_dd_mod, na.rm=TRUE),
-            lon = mean(lon_dd_mod, na.rm=TRUE))
-
-#joining the coordinates
-LSMS_maize <- left_join(LSMS_maize, LSMS_coordinates, by = "ea_id2")
-
-#keeeping only those with full coordinates
-LSMS_maize <- LSMS_maize %>% filter(!is.na(lat) & !is.na(lon))
-```
-
-## 4) Creating spatial object
-
-Now that we have a dataset will full coordinates and prices, I'll create a shapefile to use for predictions
-
-```{r }
-#Let's just save ids and prices
-LSMS_maize_prices <- LSMS_maize %>% dplyr::select(ea_id2, maip_USDkg)
-
-#creating spatial object with those coordinates
-LSMS_maize_vect <- sp::SpatialPointsDataFrame(cbind(LSMS_maize$lon, LSMS_maize$lat),
-                                              data = LSMS_maize_prices)
-# wgs84.prj: projection for coordinates in prices csv
-crs(LSMS_maize_vect) <- "+proj=longlat +datum=WGS84 +no_defs"
-
-#export vector to use for predictions
-writeOGR(LSMS_maize_vect,
-         dsn = "../../data/prices/ETH_LSMS_market_maize_prices_2016.shp", layer = "maip_USDkg", driver = "ESRI Shapefile")
-```
-
-```{r}
-ETH_adm <- readOGR("F:/Work/GADM/gadm36_levels_shp/gadm36_ETH_shp/gadm36_ETH_0.shp")
-plot(LSMS_maize_vect, pch = 20, col = "Red", main = "Locations With Known Maize Prices")
-lines(ETH_adm)
-```
-
-
-The raster files in the Markus stack use [Lambert azimuthal equal-area projection](https://en.wikipedia.org/wiki/Lambert_azimuthal_equal-area_projection), which better preserves areas and distances compared with the WGS84 projection. We transform the projection of the maize price shapefile to match this projection since it must share the same projection system with the rasters in any spatial process.
-```{r}
-LSMS_maize_vect <- vect("../../data/prices/ETH_LSMS_market_maize_prices_2016.shp")
-
-#Projecting the vector to this projection
-LSMS_maize_vect <- terra::project(LSMS_maize_vect, rasterstack)
-```
-
-## 5) Extracting values to table: calibration and validation
-
- prepare the model training data (response variable and prediction variables). The response variable is composed of georeferenced point data and the prediction variables rasters in a stack; we extract values from locations with a response value in the prediction variables to create the training data. A pixel/cell value may include random errors during data collection or processing. To ensure we get a more representational value, we extract the mean of all pixel values within a 5000 meters radius (ground distance) of the response variable location. We remove any columns that have `NA` as the mean (points that fall in areas with no data).
-```{r}
-dataset <- data.frame(maip_USDkg = LSMS_maize_vect$maip_USDkg)
 
 
 #extracting values within a raster
-dataset = cbind(dataset,
-                terra::extract(rasterstack, 
-                               LSMS_maize_vect, 
-                               buffer=5000, # Meters
-                               small=TRUE, 
-                               fun = mean))
-                
-
-#keeping only points with complete information
-dataset.complete <- dataset[complete.cases(dataset),]
-
-# Training/Test set partition ---------------------------------------------
-set.seed(1234)
-cal <- sample(x = nrow(dataset.complete), size = round(0.8*nrow(dataset.complete))) 
-
-data_cal <- dataset.complete[cal, ] ## calibration data
-data_val <- dataset.complete[-cal, ] ## validation data
+CSA <- cbind(CSA,
+             terra::extract(rasterstack, 
+                            CSA_vect, 
+                            buffer=5000, # Meters
+                            small=TRUE, 
+                            fun = mean))
 ```
+
+# III. ADDING SEASONAL RAINFALL DATA FROM
+
+## Specific rainfall seasons
+I'll add multiple rainfall seasons summaries to the rows. This code below adds the seasonal rainfalls depending on the year of the row.
+
+```{r}
+#Rainfall seasons to analyze
+belg_rainfall_seas <- c("02", "03", "04", "05") #february to may 
+meher_barley_rainfall_seas <- c("05", "06", "07", "08","09", "10") #may to october
+meher_maize_rainfall_seas <- c("03", "04", "05", "06", "07", "08", "09") #march to september
+meher_wheat_rainfall_seas <- c("05", "06", "07", "08","09", "10") #march to september
+#list of seasons names to use in the loop
+rainfall_seasons <- c("belg_rainfall_seas", "meher_barley_rainfall_seas", "meher_maize_rainfall_seas", "meher_wheat_rainfall_seas")
+
+#dekads to use
+dekads <- c(1,2,3)
+
+#years to extract
+years <- c(2013:2019)
+
+#table to store results to later cbind to CSA
+results <- data.frame(matrix(ncol = length(rainfall_seasons), nrow = nrow(CSA)))
+colnames(results) <- c(rainfall_seasons)
+
+#chirps dataset is in a different projection
+CSA_vect_forchirps <- CSA_vect
+CSA_vect_forchirps <- project(CSA_vect_forchirps, "+proj=longlat +datum=WGS84 +no_defs")
+
+for(rainfall_season in rainfall_seasons){
+  #rainfall_season <- rainfall_seasons[1]  #to test
+  for (year in years){
+    #year <- 2013 #to test
+    
+    #tifs of all combinations of all dekads and months for that season
+    rainfall_season_rasters <- rast(apply(expand.grid("F:/Work/CHIRPS/ftp.chg.ucsb.edu/pub/org/chg/products/CHIRPS-2.0/africa_dekad/tifs/chirps-v2.0.",
+                                                      year, ".", get(rainfall_season), ".", dekads, ".tif"), 1, paste, collapse=""))
+    
+    #extracting for all dekads and taking the sum. Only store those values that match the year
+    results[CSA$Year==year,rainfall_season]<- rowSums(terra::extract(rainfall_season_rasters, CSA_vect_forchirps, drop=TRUE))[CSA$Year==year] #the sum of the rainfall for dekads
+    
+  }
+}
+
+#cbind the results to CSA table that will be exportable
+CSA <- cbind(CSA, results)
+```
+
+## Lagged rainfall season
+
+```{r}
+#List of months of lag that should be extracted (rainfall in the previous n months)
+lags <- c(3,6)
+
+#table to store results to later cbind to CSA
+results <- data.frame(matrix(ncol = length(lags), nrow = nrow(CSA)))
+colnames(results) <- paste0("lagrainfall", lags)
+
+for(l in lags){
+  #l <- lags[1]
+  for (year in years){
+    #year <- 2013 #to test
+    for(month in months.name){
+      #month <- "january"
+      month.code <- match(month, months.name)  #initial month code
+      
+      month.lag.code <- (month.code-l):(month.code-1)
+      month.lag.code[month.lag.code<=0] <-  month.lag.code[month.lag.code<=0] + 12
+      
+      #adding a leading 0 to single digits
+      month.lag.code <- sprintf("%02d", month.lag.code)
+      
+      #tifs of all combinations of all dekads and months for that season
+      rainfall_season_rasters <- rast(apply(expand.grid("F:/Work/CHIRPS/ftp.chg.ucsb.edu/pub/org/chg/products/CHIRPS-2.0/africa_dekad/tifs/chirps-v2.0.",
+                                                        year, ".", month.lag.code, ".", dekads, ".tif"), 1, paste, collapse=""))
+      
+      #extracting for all dekads and taking the sum. Only store those values that match the year
+      results[CSA$Year==year & CSA$Month==month,paste0("lagrainfall", l)]<- rowSums(terra::extract(rainfall_season_rasters, CSA_vect_forchirps, drop=TRUE))[CSA$Year==year & CSA$Month==month] #the sum of the rainfall for dekads
+      
+    }
+    
+  }
+}
+
+#cbind the results to CSA table that will be exportable
+CSA <- cbind(CSA, results)
+```
+
+
+# IV. EXPORTING THE DATASET
 
 ## 6) Exporting tables to files for reading
 ```{r}
-write.csv(data_cal, "../../data/prices/maize_market_price_calibration.csv", row.names=FALSE)
-write.csv(data_val, "../../data/prices/maize_market_price_validation.csv", row.names=FALSE)
+write.csv(CSA, "../../data/prices/CSA_market_price_data.csv", row.names=FALSE)
 ```
 
 
