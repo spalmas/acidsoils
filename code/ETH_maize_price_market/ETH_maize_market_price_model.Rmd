@@ -1,0 +1,296 @@
+---
+title: "Ensemble Prediction of Market Maize Prices in Ethiopia"
+author: "Sebastian Palmas"
+date:  "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE) 
+```
+
+# INTRODUCTION
+Maize price estimates covering a continuous geographical area are difficult to collect: It costs a lot and takes time to collect the data. Using the price of maize at known locations and the value of spatial variables at these locations, we can create a model for predicting maize prices. Given the values of the spatial variables, the model will consequently predict the price of maize in other locations.
+
+The price predicted here are deviations from de-trended prices obtained by dividing each month’s observations by that month’s mean value, and then scaling to normalize.
+
+
+
+# SETUP
+
+The setup for this script is `ETH_maize_market_price_setup.Rmd`. In this file I create the calibration and validation datasets.
+
+## Packages
+We use the "sp", "raster" and "rgdal" R packages for creating and manipulating spatial data in this exercise. They are all add-on packages that have to be installed from CRAN.
+```{r, results = 'hide'}
+rm(list=ls()) 
+library(dplyr)
+library(ggplot2)
+library(rgdal)
+library(terra)
+
+source("../plot_fitness.R")
+```
+
+# I. LOADING DATASETS
+```{r}
+CSA <- read.csv("../../data/prices/CSA_maize_market_price_data.csv")
+CSA$Month_code <- factor(CSA$Month_code)
+```
+
+
+## Calibration and validation datasets
+
+Prepare the model training data (response variable and prediction variables). The response variable is composed of georeferenced point data and the prediction variables rasters in a stack; we extract values from locations with a response value in the prediction variables to create the training data. A pixel/cell value may include random errors during data collection or processing. To ensure we get a more representational value, we extract the mean of all pixel values within a 5000 meters radius (ground distance) of the response variable location. We remove any columns that have `NA` as the mean (points that fall in areas with no data).
+
+```{r}
+# Training/Test set partition ---------------------------------------------
+set.seed(1234)
+cal <- sample(x = nrow(CSA), size = round(0.8*nrow(CSA))) 
+
+c.data <- CSA[cal, ] ## calibration data
+v.data <- CSA[-cal, ] ## validation data
+```
+
+# II. FITTING INDIVIDUAL MODELS
+
+We will use an ensemble method to predict the market maize prices. The models in the ensemble method are
+
+* Stochastic Gradient boosting: from xgboost package
+* Neural network
+* PLS regression
+* Random forest: from ranger package
+* Regularized regression
+
+These are the packages needed for all the models:
+```{r, message = FALSE}
+library(caret)
+library(deepnet)
+library(gbm)
+library(glmnet)
+library(pls)
+library(randomForest)
+```
+
+## A) Stochastic gradient Boosting
+```{r}
+# Control setup
+set.seed(1234)
+tc <- trainControl(method = "cv", number=10)
+
+#Traning model
+model.gbm <- train(x = c.data[,2:46], y = c.data[,1], 
+                   method = "gbm", 
+                   preProc = c("center", "scale"),
+                   trControl = tc,
+                   tuneGrid = expand.grid(.n.trees=seq(50,500,by=50), 
+                                          .interaction.depth = 3,
+                                          .shrinkage = 0.1,
+                                          .n.minobsinnode = 100))
+
+print(model.gbm)
+```
+
+```{r, echo=FALSE}
+v.imp.gbm <- varImp(model.gbm)
+plot(v.imp.gbm, top=28)
+```
+
+## B) Neural network
+```{r, message=FALSE, warning=FALSE, eval=FALSE}
+set.seed(1234)
+tc <- trainControl(method = "cv", number = 10)
+
+#Traning model
+model.nn <- train(c.data[,2:46], c.data[,1], 
+                  method = "dnn", 
+                  preProc = c("center", "scale"), 
+                  trControl = tc,
+                  tuneGrid = expand.grid(layer1 = 2:6,
+                                         layer2 = 0:3,
+                                         layer3 = 0:3,
+                                         hidden_dropout = 0,
+                                         visible_dropout = 0))
+
+print(model.nn)
+```
+
+
+```{r, echo=FALSE, eval=FALSE}
+v.imp.nn <- varImp(model.nn)
+plot(v.imp.nn, top=28)
+```
+
+## C) PLS Regression
+```{r}
+set.seed(1234)
+tc <- trainControl(method = "cv", number = 10)
+
+#Traning model
+model.pls <- train(c.data[,2:46], c.data[,1], 
+                   method = "pls", 
+                   preProc = c("center", "scale"),
+                   tuneGrid = expand.grid(ncomp = 1:10),
+                   trControl = tc)
+
+print(model.pls)
+
+```
+
+```{r, echo=FALSE}
+v.imp.pls <- varImp(model.pls)
+plot(v.imp.pls, top=28)
+```
+
+## D) Random Forest
+### Tune The Forest
+By "tune the forest", we mean the process of determining the optimal number of variables to consider at each split in a decision-tree. Too many prediction variables and the algorithm will over-fit; too few prediction variables and the algorithm will under-fit. so first, we use `tuneRF` function to get the possible optimal numbers of prediction variables. The `tuneRF` function takes two arguments: the prediction variables and the response variable.
+
+```{r}
+# Control setup
+set.seed(1234)
+tc <- trainControl(method = "oob")
+
+#Traning model
+model.rf <- train(c.data[,2:46], c.data[,1], 
+                  method = "rf",
+                  preProc = c("center", "scale"),
+                  trControl = tc)
+
+print(model.rf)
+```
+
+```{r, echo=FALSE}
+v.imp.rf <- varImp(model.rf, useModel = FALSE)
+plot(v.imp.rf, top=28)
+```
+## D) Regional mean model
+I'll compare all models to a national average and regional average.
+```{r}
+#average models
+nat.avg <- c.data %>% group_by(Month_code) %>% 
+  summarise(maize_Unmilled_norm_nat.avg = mean(maize_Unmilled_norm))
+
+reg.avg <- c.data %>% group_by(Region,Month_code) %>% 
+  summarise(maize_Unmilled_norm_reg.avg = mean(maize_Unmilled_norm))
+
+
+#comparing avg models to measured
+c.data.withavg <- left_join(c.data, nat.avg, by=c("Month_code")) %>% left_join(reg.avg, by=c("Region", "Month_code"))
+```
+
+# III. ENSEMBLE FITTING
+The ensemble fitting is using the validation dataset because predictions on data that have been used for the training of the weak learners are not relevant for the training of the meta-model. 
+
+*I need to check the proportion used to divide calibration and validation datasets. Right now is 80-20%*
+
+```{r}
+c.data.ens <- data.frame(maize_Unmilled_norm = v.data$maize_Unmilled_norm,
+                         maize_Unmilled_norm.gbm = predict(model.gbm, v.data),
+                         maize_Unmilled_norm.pls = predict(model.pls, v.data),
+                         maize_Unmilled_norm.rf = predict(model.rf, v.data))
+```
+
+Building the ensemble model using `glmnet`.
+
+```{r, message=FALSE}
+set.seed(1234)
+
+model.ens <- lm(maize_Unmilled_norm ~
+                  maize_Unmilled_norm.gbm + 
+                  maize_Unmilled_norm.pls +
+                  maize_Unmilled_norm.rf,
+                data = c.data.ens)
+
+#exporting model to rda to use later
+save(model.ens, file="../../output/models/market_price.rda")
+
+print(model.ens)
+```
+
+
+```{r, echo=FALSE}
+par(mfrow=c(3,2))
+plot_fitness(obs = c.data.withavg$maize_Unmilled_norm, pred = c.data.withavg$maize_Unmilled_norm_nat.avg, name = "Cal: National monthly avg.")
+plot_fitness(obs = c.data.withavg$maize_Unmilled_norm, pred = c.data.withavg$maize_Unmilled_norm_reg.avg, name = "Cal: Regional monthly avg.")
+plot_fitness(obs = c.data$maize_Unmilled_norm, pred = predict(model.gbm), name = "Cal: GBM")
+plot_fitness(obs = c.data$maize_Unmilled_norm, pred = predict(model.pls), name = "Cal: PLS")
+plot_fitness(obs = c.data$maize_Unmilled_norm, pred = predict(model.rf), name = "Cal: RF")
+plot_fitness(obs = v.data$maize_Unmilled_norm, pred = predict(model.ens), name = "Cal: Ensemble")
+```
+
+
+# IV. MODEL VALIDATION
+
+We will use the validation dataset to check the prediction.
+
+## IV.I Prediction on validation dataset
+```{r}
+#Getting predictions on the validation datasets
+#Average models
+v.data.withavg <- left_join(v.data, nat.avg, by=c("Month_code")) %>% left_join(reg.avg, by=c("Region", "Month_code"))
+
+#AI models
+maize_Unmilled_norm.gbm <- predict(model.gbm, newdata = v.data)
+#maip_USDkg.nn <- predict(model.nn, newdata = v.data)
+maize_Unmilled_norm.pls <- predict(model.pls, newdata = v.data)
+maize_Unmilled_norm.rf <- predict(model.rf, newdata = v.data)
+
+#Putting together ensemble results to a table
+v.data.ens <- data.frame(maize_Unmilled_norm.gbm,
+                         maize_Unmilled_norm.pls,
+                         maize_Unmilled_norm.rf)
+
+#running ensemble model
+maize_Unmilled_norm.ens <- predict(model.ens, v.data.ens)
+```
+
+```{r, echo=FALSE}
+par(mfrow=c(3,2))
+plot_fitness(obs = v.data.withavg[,1], pred = v.data.withavg$maize_Unmilled_norm_nat.avg, name = "Val: National monthly avg.")
+plot_fitness(obs = v.data.withavg[,1], pred = v.data.withavg$maize_Unmilled_norm_reg.avg, name = "Val: Regional monthly avg.")
+plot_fitness(obs = v.data$maize_Unmilled_norm, pred = maize_Unmilled_norm.gbm, name = "Val: GBM")
+plot_fitness(obs = v.data$maize_Unmilled_norm, pred = maize_Unmilled_norm.pls, name = "Val: PLS")
+plot_fitness(obs = v.data$maize_Unmilled_norm, pred = maize_Unmilled_norm.rf, name = "Val: RF")
+plot_fitness(obs = v.data$maize_Unmilled_norm, pred = maize_Unmilled_norm.ens, name = "Val: Ensemble")
+```
+## IV.II Prediction on LSMS
+```{r}
+LSMS <- read.csv("../../data/prices/LSMS_maize_market_price.csv")
+
+#Changing Month_code to a factor
+LSMS$Month_code <- factor(LSMS$Month_code, levels=c(1:8))
+
+#AI models
+maize_Unmilled_norm.gbm <- predict(model.gbm, newdata = LSMS)
+#maize_Unmilled_norm.nn <- predict(model.nn, newdata = LSMS)
+maize_Unmilled_norm.pls <- predict(model.pls, newdata = LSMS)
+maize_Unmilled_norm.rf <- predict(model.rf, newdata = LSMS)
+
+#Putting together ensemble results to a table
+v.data.ens <- data.frame(maize_Unmilled_norm.gbm,
+                         maize_Unmilled_norm.pls,
+                         maize_Unmilled_norm.rf)
+
+#running ensemble model
+maize_Unmilled_norm.ens <- predict(model.ens, v.data.ens)
+```
+
+```{r, echo=FALSE}
+par(mfrow=c(2,2))
+plot_fitness(obs = LSMS$maize_Unmilled_norm, pred = maize_Unmilled_norm.gbm, name = "Val: GBM")
+plot_fitness(obs = LSMS$maize_Unmilled_norm, pred = maize_Unmilled_norm.pls, name = "Val: PLS")
+plot_fitness(obs = LSMS$maize_Unmilled_norm, pred = maize_Unmilled_norm.rf, name = "Val: RF")
+plot_fitness(obs = LSMS$maize_Unmilled_norm, pred = maize_Unmilled_norm.ens, name = "Val: Ensemble")
+```
+
+# V. EXPORTING MODELS TO USE IN RASTER PRICE PREDICTION
+```{r}
+save(model.gbm, file="../../output/models/maip_USDkg_gbm.rda")
+save(model.pls, file="../../output/models/maip_USDkg_pls.rda")
+save(model.rf, file="../../output/models/maip_USDkg_rf.rda")
+save(model.ens, file="../../output/models/maip_USDkg_ens.rda")
+```

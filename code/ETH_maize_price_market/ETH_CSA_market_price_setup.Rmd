@@ -45,11 +45,11 @@ CSA[CSA == "."] <- NA
 CSA <- CSA[!is.na(CSA$Longitude) & !is.na(CSA$Latitude),]
 
 #converting factor to numeric
-CSA$Longitude <- as.numeric(levels(CSA$Longitude))[CSA$Longitude]
-CSA$Latitude <- as.numeric(levels(CSA$Latitude))[CSA$Latitude]
-CSA$barley_unmilled_White <- as.numeric(levels(CSA$barley_unmilled_White))[CSA$barley_unmilled_White]
-CSA$maize_Unmilled <- as.numeric(levels(CSA$maize_Unmilled))[CSA$maize_Unmilled]
-CSA$wheat_unmilled_White <- as.numeric(levels(CSA$wheat_unmilled_White))[CSA$wheat_unmilled_White]
+CSA$Longitude <- as.numeric(CSA$Longitude)
+CSA$Latitude <- as.numeric(CSA$Latitude)
+CSA$barley_unmilled_White <- as.numeric(CSA$barley_unmilled_White)
+CSA$maize_Unmilled <- as.numeric(CSA$maize_Unmilled)
+CSA$wheat_unmilled_White <- as.numeric(CSA$wheat_unmilled_White)
 ```
 
 ### Creating a date column
@@ -63,8 +63,68 @@ CSA$Month_code <- lubridate::month(match(CSA$Month, months.name))
 CSA$Date <- as.Date(with(CSA, paste(Year, Month_code, 1,sep="-")), "%Y-%m-%d")
 ```
 
+## 2) Correcting temporal trend
 
-## 2) Creating spatial object from the CSA data
+We eliminate the temporal trend and scale it back by doing a z-transformation using the mean and sd of each year and month.
+```{r}
+CSA_summary_price <- CSA %>% 
+  group_by(Year, Month_code) %>% 
+  summarise(barley_unmilled_White_mean = mean(barley_unmilled_White, na.rm=TRUE),
+            maize_Unmilled_mean = mean(maize_Unmilled, na.rm=TRUE),
+            wheat_unmilled_White_mean = mean(wheat_unmilled_White, na.rm=TRUE),
+            #Standard deviation
+            barley_unmilled_White_sd = sd(barley_unmilled_White, na.rm=TRUE),
+            maize_Unmilled_sd = sd(maize_Unmilled, na.rm=TRUE),
+            wheat_unmilled_White_sd = sd(wheat_unmilled_White, na.rm=TRUE))
+
+#joining the data to the CSA
+CSA <- left_join(CSA, CSA_summary_price, by = c("Year", "Month_code"))
+
+#Z-score standardization
+CSA <- CSA %>%
+  mutate(barley_unmilled_White_norm = (barley_unmilled_White - barley_unmilled_White_mean) / barley_unmilled_White_sd,
+         maize_Unmilled_norm = (maize_Unmilled - maize_Unmilled_mean) / maize_Unmilled_sd,
+         wheat_unmilled_White_norm = (wheat_unmilled_White - wheat_unmilled_White_mean) / wheat_unmilled_White_sd)
+
+```
+
+## 3) Adding previous month price as column
+We need to match the previous month prices from each market to each row.
+
+Because of the many rules, I'll do this in a for loop even though it is slow.
+
+```{r}
+#column to store values
+CSA$barley_unmilled_White_norm_t0 <- NA
+CSA$maize_Unmilled_norm_t0 <- NA
+CSA$wheat_unmilled_White_norm_t0 <- NA
+
+for (r in 1:nrow(CSA)){
+  #r <- 1 #to test
+  Market1 <- CSA$Market[r]
+  
+  Month_code1 <- CSA$Month_code[r]
+  Year1 <- CSA$Year[r]
+  
+  if(Month_code1 == 1){
+    Month_code0 <- 12
+    Year0 <- Year1 - 1
+  } else {
+    Month_code0 <- Month_code0 - 1
+    Year0 <- Year1
+  }
+  
+  CSA0 <- CSA %>% filter(Market == Market1 & Month_code == Month_code0 & Year == Year0)
+  
+  if(nrow(CSA0) != 0){
+    CSA$barley_unmilled_White_norm_t0[r] <- CSA0$barley_unmilled_White_norm
+    CSA$maize_Unmilled_norm_t0[r] <- CSA0$maize_Unmilled_norm
+    CSA$wheat_unmilled_White_norm_t0[r] <- CSA0$wheat_unmilled_White_norm
+  }
+}
+```
+
+## 4) Creating spatial object from the CSA data
 
 Now that we have a dataset will full coordinates and prices, I'll create a shapefile to extract the values from the rasterstack.
 
@@ -83,25 +143,65 @@ The raster files in the Markus stack use [Lambert azimuthal equal-area projectio
 PH <- rast("F:/Work/MarkusStacks/ET_250m_2019/ET_500m_2019_resampled/PH.tif")
 
 #Projecting the vector to this projection
-CSA_vect <- project(CSA_vect, PH)
+CSA_vect <- terra::project(CSA_vect, crs(PH)[1])
 
 #export vector to use for predictions
 #writeVector(CSA_vect,
-#            filename = "../../data/prices/ETH_CSA_market_maize_prices_2016.shp",
+#            filename = "../../data/prices/CSA_market_maize_prices_2016.shp",
 #            overwrite=TRUE)
 ```
 
 ```{r, echo=FALSE}
-ETH_adm <- vect("F:/Work/GADM/gadm36_levels_shp/gadm36_ETH_shp/gadm36_ETH_0.shp") %>% project(CSA_vect)
+ETH_adm <- vect("F:/Work/GADM/gadm36_levels_shp/gadm36_ETH_shp/gadm36_ETH_0.shp") %>% project(crs(PH)[1])
 plot(CSA_vect, pch = 20, col = "Red", main = "Locations With Known CSA Prices")
 lines(ETH_adm)
 ```
 
 
 # II. PREPARING TIME-INVARIANT RASTERSTACK
-There are multiple spatial covariates. Weather, soil and amenities. Also we add latitude and longitude data.
+There are multiple spatial covariates. Meher/Belg seasonality, weather, soil and amenities. Also we add latitude and longitude data.
 
-## 1) Raster Data on Weather, Soil and Amenities
+## 1) Meher/Belg location
+Raster version of the Meher/Belg distribution. This original vector version comes from. The rasterized version is prepared in `prepare_rasters.sh` file.
+```{r}
+Meher_Belg <- rast("../../data/Meher_Belg_Regions/Meher_Belg_Regions.tif")
+
+CSA <- cbind(CSA,
+             terra::extract(Meher_Belg, CSA_vect,drop=TRUE))
+```
+
+
+```{r, echo=FALSE}
+plot(Meher_Belg)
+```
+
+## 2) Add Latitude and Longitude Rasters
+We add longitude and latitude rasters to the stack so that our model considers location in its prediction. The longitude and latitude rasters will have the longitude values and latitude values respectively as the cell values. We use one raster from the stack created earlier as a reference, to ensure the latitude and longitude rasters have the same properties.
+
+Create the longitude and latitude rasters in 5 steps: convert the Tanzania's "level 0" shapefile -downloaded earlier- projection to the Lambert azimuthal equal-area projection; transform it to a raster with the reference raster's properties; extract the longitude and latitude values from the created raster; assign the longitude and latitude values to two copies of the created raster; name the raster cell values and add them to the rasters stack.
+
+This most likely can be done more efficiently with r.latlong in GRASS, but I couldn't make it work.
+
+```{r, eval=FALSE}
+#Extacting longitude and latitude values for each column and row
+longitudes <- xFromCol(rasterstack[[1]], 1:dim(rasterstack[[1]])[2]) 
+longitudes <- rep(longitudes, times = dim(rasterstack[[1]])[1])
+latitudes <- yFromRow(rasterstack[[1]], 1:dim(rasterstack[[1]])[1])
+latitudes <- rep(latitudes, times = dim(rasterstack[[1]])[2])
+latitudes <- sort(latitudes, decreasing=TRUE)
+
+#Creating the rasters and assigning the values
+natbnd.raster.long <- rasterstack[[1]]
+values(natbnd.raster.long) <- longitudes
+names(natbnd.raster.long) <- "Longitude"  #changing the name of the values
+writeRaster(natbnd.raster.long, filename = "F:/Work/MarkusStacks/ET_250m_2019/ET_500m_2019_resampled/long.tif", overwrite=TRUE)
+natbnd.raster.lat <- rasterstack[[1]]
+values(natbnd.raster.lat) <- latitudes
+names(natbnd.raster.lat) <- "Latitude"  #changing the name of the values
+writeRaster(natbnd.raster.lat, filename = "F:/Work/MarkusStacks/ET_250m_2019/ET_500m_2019_resampled/lat.tif", overwrite=TRUE)
+```
+
+## 3) Raster Data on Weather, Soil and Amenities
 The raster files contain data on weather elements, soil properties and distance to infrastructure/amenities. In this exercise, these files are in a sub-directory of the working directory. You can download them [here](https://osf.io/j8y3z/). The table below gives a short description of each file and a link to the source website.
 
 |Raster | Short description | Derived from:
@@ -171,38 +271,114 @@ rasterlist <- rasterlist[-lat_raster]
 long_raster <- grep("long.tif", rasterlist)
 rasterlist <- rasterlist[-long_raster]
 
-
 #creating rasterstack
 rasterstack <- rast(rasterlist)
 
 #extracting values within a raster
 CSA <- cbind(CSA,
-             terra::extract(rasterstack, 
-                            CSA_vect, 
-                            buffer=5000, # Meters
-                            small=TRUE, 
-                            fun = mean))
+             terra::extract(rasterstack, CSA_vect, 
+                            #buffer=5000, # Meters
+                            drop=TRUE))
 ```
+
+
+
+
+
 
 # III. ADDING SEASONAL RAINFALL DATA FROM
 
 ## Specific rainfall seasons
-I'll add multiple rainfall seasons summaries to the rows. This code below adds the seasonal rainfalls depending on the year of the row.
+
+These are the rules for assigning rainfall estiamtes to each row:
+
+* Meher (Kiremt) rainfall that runs from March to September are assigned to rows between September to August.
+* In Belg-receiving areas, Belg rains between February to May are assigned to prices between June and August.
+
+This code below adds the seasonal rainfalls depending on the year and month of each row.
 
 ```{r}
 #Rainfall seasons to analyze
+kiremt_rainfall_seas <- c("06", "07", "08") #June to August
 belg_rainfall_seas <- c("02", "03", "04", "05") #february to may 
-meher_barley_rainfall_seas <- c("05", "06", "07", "08","09", "10") #may to october
-meher_maize_rainfall_seas <- c("03", "04", "05", "06", "07", "08", "09") #march to september
-meher_wheat_rainfall_seas <- c("05", "06", "07", "08","09", "10") #march to september
+
 #list of seasons names to use in the loop
-rainfall_seasons <- c("belg_rainfall_seas", "meher_barley_rainfall_seas", "meher_maize_rainfall_seas", "meher_wheat_rainfall_seas")
+rainfall_seasons <- c("kiremt_rainfall_seas", "belg_rainfall_seas")
 
 #dekads to use
 dekads <- c(1,2,3)
 
 #years to extract
-years <- c(2013:2019)
+years <- CSA$Year %>% unique() %>% sort()
+
+#table to store results to later cbind to CSA
+results <- rep(NA, times = nrow(CSA))
+
+#chirps dataset is in a different projection
+CSA_vect_forchirps <- CSA_vect
+CSA_vect_forchirps <- project(CSA_vect_forchirps, "+proj=longlat +datum=WGS84 +no_defs")
+
+for(rainfall_season in rainfall_seasons){
+  #rainfall_season <- rainfall_seasons[1]  #to test
+  for (year in years){
+    #year <- 2013 #to test
+    
+    #tifs of all combinations of all dekads and months for that season
+    rainfall_season_rasters <- rast(apply(expand.grid("F:/Work/CHIRPS/ftp.chg.ucsb.edu/pub/org/chg/products/CHIRPS-2.0/africa_dekad/tifs/chirps-v2.0.",
+                                                      year, ".", get(rainfall_season), ".", dekads, ".tif"), 1, paste, collapse=""))
+    
+    #Getting the sums of rainfall for all points
+    values <- rowSums(terra::extract(rainfall_season_rasters, CSA_vect_forchirps, drop=TRUE))
+    
+    #Depending on the season, we store the prices in specific months
+    if(rainfall_season == "kiremt_rainfall_seas"){
+      #months to store (all of them for Kiremt)
+      season_price_months1 <- c(9,10,11,12)
+      season_price_months2 <- c(1,2,3,4,5,6,7,8)
+    
+      #which months to store (kiremt prices go to the next year)
+      rows1 <- (CSA$Year==year) & (CSA$Month_code %in% season_price_months1)
+      rows2 <- (CSA$Year==year+1) & (CSA$Month_code %in% season_price_months2)
+      
+      #store only those in the selected rows
+      results[rows1|rows2]<- values[rows1|rows2] #the sum of the rainfall for dekads
+    
+    } else if(rainfall_season == "belg_rainfall_seas") {
+      #months to store (all of them for Kiremt)
+      season_price_months1 <- c(6,7,8) 
+      
+      #which months to store (kiremt prices go to the next year)
+      rows1 <- (CSA$Year==year) & (CSA$Month_code %in% season_price_months1) & (CSA$Meher_Belg_Regions == 2)
+      
+      #store only those in the selected rows
+      results[rows1]<- values[rows1] #the sum of the rainfall for dekads
+    }
+  }
+}
+
+#bind the results to a column
+CSA$rainfall_season <- results
+```
+
+## All columns for all seasons
+I'll add multiple rainfall seasons summaries to the rows. This code below adds the seasonal rainfalls depending on the year of the row.
+
+```{r, eval=FALSE}
+#Rainfall seasons to analyze
+kiremt_rainfall_seas <- c("06", "07", "08") #June to August
+belg_rainfall_seas <- c("02", "03", "04", "05") #february to may 
+meher_barley_rainfall_seas <- c("05", "06", "07", "08","09", "10") #may to october
+meher_maize_rainfall_seas <- c("03", "04", "05", "06", "07", "08", "09") #march to september
+meher_wheat_rainfall_seas <- c("05", "06", "07", "08","09", "10") #march to september
+
+#list of seasons names to use in the loop
+rainfall_seasons <- c("kiremt_rainfall_seas", "belg_rainfall_seas", "meher_barley_rainfall_seas", "meher_maize_rainfall_seas", "meher_wheat_rainfall_seas")
+
+#dekads to use
+dekads <- c(1,2,3)
+
+#years to extract
+years <- CSA$Year %>% unique() %>% sort()
 
 #table to store results to later cbind to CSA
 results <- data.frame(matrix(ncol = length(rainfall_seasons), nrow = nrow(CSA)))
@@ -226,12 +402,13 @@ for(rainfall_season in rainfall_seasons){
     
   }
 }
-
 #cbind the results to CSA table that will be exportable
 CSA <- cbind(CSA, results)
 ```
 
 ## Lagged rainfall season
+
+Rainfall of the last months
 
 ```{r}
 #List of months of lag that should be extracted (rainfall in the previous n months)
@@ -271,38 +448,56 @@ for(l in lags){
 CSA <- cbind(CSA, results)
 ```
 
-
 # IV. SELECTING VARIABLES TO USE IN THE PREDICTION
 ```{r}
-CSA_barley <- CSA %>% dplyr::select(
-  barley_unmilled_White,
-  Month, Longitude, Latitude,
-  BIO1, BIO12, BIO15, BIO7, CEC,
-  DCELL, DGRID, DNFPA, DOR1, DOR2, DOWS, DPOP1, DPOP2, DWRES,
-  EVI, LCS, LCT, LCU, LSTD, LSTN,
-  MB1, MB2, MB3, MB7, MDEM, NLT, NPPA, NPPS,
-  PARA, PARV, PH, S1VV, S2B08, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP,
-  belg_rainfall_seas, meher_barley_rainfall_seas, lagrainfall3, lagrainfall6)
+CSA_barley <- CSA %>%
+  filter(!is.na(barley_unmilled_White_norm)) %>%
+  dplyr::select(barley_unmilled_White_norm,
+                barley_unmilled_White_norm_t0,
+                Month_code, Longitude, Latitude,
+                BIO1, BIO12, BIO15, BIO7, CEC,
+                DCELL, DGRID, DNFPA, DOR1, DOR2, DOWS, DPOP1, DPOP2, DWRES,
+                EVI, LCS, LCT, LCU, LSTD, LSTN,
+                MB1, MB2, MB3, MB7, MDEM, NLT, NPPA, NPPS,
+                PARA, PARV, PH, S1VV, S2B08, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP,
+                rainfall_season,
+                #meher_rainfall_seas, belg_rainfall_seas, meher_wheat_rainfall_seas,
+                #lagrainfall3, lagrainfall6,
+                Region) %>% 
+  filter(complete.cases(.))
 
-CSA_maize <- CSA %>% dplyr::select(
-  maize_Unmilled,
-  Month, Longitude, Latitude,
-  BIO1, BIO12, BIO15, BIO7, CEC,
-  DCELL, DGRID, DNFPA, DOR1, DOR2, DOWS, DPOP1, DPOP2, DWRES,
-  EVI, LCS, LCT, LCU, LSTD, LSTN,
-  MB1, MB2, MB3, MB7, MDEM, NLT, NPPA, NPPS,
-  PARA, PARV, PH, S1VV, S2B08, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP,
-  belg_rainfall_seas, meher_maize_rainfall_seas, lagrainfall3, lagrainfall6)
+CSA_maize <- CSA %>% 
+  filter(!is.na(maize_Unmilled_norm)) %>%
+  dplyr::select(maize_Unmilled_norm,
+                maize_Unmilled_norm_t0,
+                Month_code, Longitude, Latitude,
+                BIO1, BIO12, BIO15, BIO7, CEC,
+                DCELL, DGRID, DNFPA, DOR1, DOR2, DOWS, DPOP1, DPOP2, DWRES,
+                EVI, LCS, LCT, LCU, LSTD, LSTN,
+                MB1, MB2, MB3, MB7, MDEM, NLT, NPPA, NPPS,
+                PARA, PARV, PH, S1VV, S2B08, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP,
+                rainfall_season,
+                #meher_rainfall_seas, belg_rainfall_seas, meher_wheat_rainfall_seas,
+                #lagrainfall3, lagrainfall6,
+                Region) %>% 
+  filter(complete.cases(.))
 
-CSA_wheat <- CSA %>% dplyr::select(
-  wheat_unmilled_White,
-  Month, Longitude, Latitude,
-  BIO1, BIO12, BIO15, BIO7, CEC,
-  DCELL, DGRID, DNFPA, DOR1, DOR2, DOWS, DPOP1, DPOP2, DWRES,
-  EVI, LCS, LCT, LCU, LSTD, LSTN,
-  MB1, MB2, MB3, MB7, MDEM, NLT, NPPA, NPPS,
-  PARA, PARV, PH, S1VV, S2B08, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP, 
-  belg_rainfall_seas, meher_wheat_rainfall_seas, lagrainfall3, lagrainfall6)
+
+CSA_wheat <- CSA %>% 
+  filter(!is.na(wheat_unmilled_White_norm)) %>% 
+  dplyr::select(wheat_unmilled_White_norm,
+                wheat_unmilled_White_norm_t0,
+                Month_code, Longitude, Latitude,
+                BIO1, BIO12, BIO15, BIO7, CEC,
+                DCELL, DGRID, DNFPA, DOR1, DOR2, DOWS, DPOP1, DPOP2, DWRES,
+                EVI, LCS, LCT, LCU, LSTD, LSTN,
+                MB1, MB2, MB3, MB7, MDEM, NLT, NPPA, NPPS,
+                PARA, PARV, PH, S1VV, S2B08, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP,
+                rainfall_season,
+                #meher_rainfall_seas, belg_rainfall_seas, meher_wheat_rainfall_seas,
+                #lagrainfall3, lagrainfall6,
+                Region) %>% 
+  filter(complete.cases(.))
 
 ```
 
@@ -314,5 +509,3 @@ write.csv(CSA_barley, "../../data/prices/CSA_barley_market_price_data.csv", row.
 write.csv(CSA_maize, "../../data/prices/CSA_maize_market_price_data.csv", row.names=FALSE)
 write.csv(CSA_wheat, "../../data/prices/CSA_wheat_market_price_data.csv", row.names=FALSE)
 ```
-
-

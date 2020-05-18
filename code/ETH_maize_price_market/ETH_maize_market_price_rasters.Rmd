@@ -1,0 +1,201 @@
+---
+title: "Ensemble Prediction of Market Maize Prices in Ethiopia: Raster surfaces"
+author: "Sebastian Palmas"
+date:  "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE) 
+```
+
+# INTRODUCTION
+Now that we have the models ready to use to predict prices, we can predict price surfaces for all Ethiopia.
+
+We need to run all ML models and use their predictions for the ensemble method (`model.ens`).
+
+Because the model uses month as one of the predictors and there isn't any raster with month values we need a month to use for the prediction. For that we can use the `const` specification in the `terra::predict` function. We will simulate prices for all months.
+
+
+
+This script is the next step from `ETH_maize_market_price_model.Rmd`.
+
+
+# I. Packages and models
+```{r, message=FALSE}
+rm(list=ls()) 
+library(dplyr)
+library(ggplot2)
+library(terra)
+
+library(caret)
+library(deepnet)
+library(gbm)
+library(glmnet)
+library(pls)
+library(randomForest)
+```
+
+These are the price models 
+```{r, message=FALSE}
+#Loading price models
+load(file="../../output/models/maip_USDkg_gbm.rda")  #model.gbm
+load(file="../../output/models/maip_USDkg_pls.rda")  #model.pls
+load(file="../../output/models/maip_USDkg_rf.rda")  #model.rf
+load(file="../../output/models/maip_USDkg_ens.rda")  #model.ens
+```
+
+# II. Loading rasters
+We first need to create a raster stack with all the soil layers.
+
+```{r}
+soillist <- list.files(path = "F:/Work/MarkusStacks/ET_250m_2019/ET_500m_2019_resampled/", 
+                       pattern = "*.tif$", 
+                       full.names = TRUE) # Character vector of relative filepaths
+
+#Creating table of all soil rasterr values
+soilrasters <- rast(soillist)
+
+```
+
+In here we load the raster layers for Meher and Belg rainfall seasons that we will use 
+```{r}
+meher_season <- rast("../../data/rainfall/meher_maize_rainfall_seas_mean_ETH.tif")
+belg_season <- rast("../../data/rainfall/belg_rainfall_seas_mean_ETH.tif")
+
+#We also need the region of each pixel to modify the rainfall accordingly.
+Meher_Belg_Regions <- rast("../../data/Meher_Belg_Regions/Meher_Belg_Regions.tif")
+```
+
+# III. Prediction using a table
+```{r}
+stack_table <- data.frame(values(soilrasters))
+
+#Let's add this values to the table. These values will be used for the prediction depending on the month and region
+stack_table$meher_season <- as.vector(values(meher_season))
+stack_table$belg_season <- as.vector(values(belg_season))
+
+#add rainfall to table
+stack_table$Meher_Belg_Regions <- as.vector(values(Meher_Belg_Regions))
+```
+
+## Adding index and keeping only complete cases
+```{r}
+#adding index and filtering to complete cases #8,379,171
+stack_table <- stack_table %>%
+  mutate(index = 1:nrow(.)) %>% 
+  filter(complete.cases(.))
+```
+
+## Un-trended normalized price value from previous month
+The prediction needs a `maize_Unmilled_norm_t0` value which is the un-trended and normalized value of the maize price on the last month.
+I'll use a normalized value of 0 to start
+```{r}
+stack_table$maize_Unmilled_norm_t0 <- 0
+```
+
+## Empty Raster to store values
+```{r}
+blank_raster <- meher_season
+values(blank_raster) <- NA
+```
+
+## Prediction for all months
+```{r}
+#Months to predict
+Month_codes <- c(1:8)
+for (m in Month_codes){
+  #m <- 2 #to test
+  #Creating the month code column with factor levels appropriate to use by models
+  stack_table$Month_code <- factor(m, levels = Month_codes)
+  
+  #What happens in the period after belg ends and before Meher ends in regions with Belg rains
+  stack_table$rainfall_season <- stack_table$meher_season
+  if(m %in% c(6,7)){
+    stack_table$rainfall_season[stack_table$Meher_Belg_Regions == 2] <- stack_table$belg_season[stack_table$Meher_Belg_Regions == 2] 
+  }
+  
+  #prediction of all ML methods
+  maize_Unmilled_norm.gbm <- predict(model.gbm, newdata=stack_table)
+  maize_Unmilled_norm.pls <- predict(model.pls, newdata=stack_table)
+  maize_Unmilled_norm.rf <- predict(model.rf, newdata=stack_table)
+  
+  #Putting together ensemble results to a table
+  data.ens <- data.frame(maize_Unmilled_norm.gbm,
+                         maize_Unmilled_norm.pls,
+                         maize_Unmilled_norm.rf)
+  
+  #running ensemble model
+  maize_Unmilled_norm.ens <- predict(model.ens, data.ens)
+  
+  #Running ML models
+  for(model in c("gbm", "pls", "rf", "ens")){
+    values(blank_raster)[stack_table$index] <- get(paste0("maize_Unmilled_norm.", model))
+    
+    writeRaster(blank_raster, filename=paste0("../../output/crop_market_price/months/ETH_maize_market_price_", model, m, ".tif"),
+                overwrite=TRUE, wopt = list(names = paste0("maize_Unmilled_norm.", model)))
+  }
+}
+```
+
+# IV. Raster prediction using terra::predict
+```{r, eval=FALSE}
+#Months to predict
+Month_codes <- c(1:8)
+
+#Constant raster to use for maize_Unmilled_norm_t0
+maize_Unmilled_norm_t0 <- rast("../../data/rainfall/meher_maize_rainfall_seas_mean_ETH.tif")
+values(maize_Unmilled_norm_t0) <- 0
+names(maize_Unmilled_norm_t0) <- "maize_Unmilled_norm_t0"
+
+#Constant raster to use for month code
+#Month_code <- rast("../../data/rainfall/meher_maize_rainfall_seas_mean_ETH.tif")
+
+#Prediction for all months
+for (m in Month_codes){
+  #m <- 1 #to tet
+  #changing the month to predict
+  #values(Month_code) <- m
+  #names(Month_code) <- "Month_code"
+  
+  #constant month factor
+  add <- data.frame(Month_code = factor(m, levels=1:8))
+
+  if(m %in% c(6,7)){
+    rainfall_season <- rast("../../data/rainfall/meher_maize_rainfall_seas_mean_ETH.tif")
+    names(rainfall_season) <- "rainfall_season"
+  } else {
+    rainfall_season <- rast("../../data/rainfall/meher_maize_rainfall_seas_mean_ETH.tif")
+    names(rainfall_season) <- "rainfall_season"
+  }
+  
+  #Putting together the rasterstack with correct rainfall season
+  rasterstack <- c(maize_Unmilled_norm_t0, soilrasters, rainfall_season)
+  
+  #Predicting with ML methods
+  maip_USDkg.gbm <- predict(rasterstack, model.gbm, 
+                            const = add, na.rm=TRUE,
+                            filename=paste0("../../output/crop_market_price/months/ETH_maize_market_price_gbm", m, ".tif"), overwrite=TRUE,
+                            wopt = list(names = "maip_USDkg.gbm"))
+  maip_USDkg.pls <- predict(rasterstack, model.pls,
+                            const = add, , na.rm=TRUE,
+                            filename=paste0("../../output/crop_market_price/months/ETH_maize_market_price_pls", m, ".tif"), overwrite=TRUE,
+                            wopt = list(names = "maip_USDkg.pls"))
+  maip_USDkg.rf <- predict(rasterstack, model.rf, 
+                           const = add, na.rm=TRUE,
+                           filename=paste0("../../output/crop_market_price/months/ETH_maize_market_price_rf", m, ".tif"), overwrite=TRUE,
+                           wopt = list(names = "maip_USDkg.rf"))
+  
+  #Predicting with ensemble model
+  #Putting together rasterstack for ensemble
+  #raster.data.ens <- rast(maip_USDkg.pls, 
+  #                        maip_USDkg.rf, nlyrs=2)
+  
+  #maip_USDkg.ens <- predict(raster.data.ens, model.ens, na.rm=TRUE,
+  #          filename="../../output/crop_market_price/ETH_maize_market_price_ENS.tif", overwrite=TRUE)
+
+}
+```

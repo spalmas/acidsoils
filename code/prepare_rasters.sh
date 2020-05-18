@@ -351,3 +351,19 @@ gdal_rasterize -at -a fclass -l eth_trs_roads_osm \
     /mnt/f/Work/Ethiopia/OSM/eth_trs_roads_osm/eth_trs_roads_osm.shp \
     /mnt/f/Work/Ethiopia/OSM/eth_trs_roads_osm/eth_trs_roads_osm.tif
     
+
+########################################
+#RASTERIZE AG SYSTEM CODE (MEHER & BELG)
+########################################
+gdal_rasterize -at -a AgSysCode -l Meher_Belg_regions \
+    -ts 6496 5157 \
+    -of Gtiff -co compress=lzw \
+    /mnt/f/Work/Ethiopia/Meher_Belg_Regions/Meher_Belg_regions.shp \
+    /mnt/f/Work/Ethiopia/Meher_Belg_Regions/Meher_Belg_regions.tif
+
+gdalwarp -t_srs '+proj=laea +lat_0=5 +lon_0=20 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs' -te 1430500 -156250 3054750 1133250 -tr 500 500 \
+    -r near -of GTiff -co compress=lzw -overwrite \
+    /mnt/f/Work/Ethiopia/Meher_Belg_Regions/Meher_Belg_regions.tif \
+    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/Meher_Belg_Regions/Meher_Belg_Regions.tif
+
+    
