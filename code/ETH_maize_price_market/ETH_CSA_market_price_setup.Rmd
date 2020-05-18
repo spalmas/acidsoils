@@ -52,6 +52,8 @@ CSA$maize_Unmilled <- as.numeric(CSA$maize_Unmilled)
 CSA$wheat_unmilled_White <- as.numeric(CSA$wheat_unmilled_White)
 ```
 
+
+
 ### Creating a date column
 ```{r}
 months.name <- c("january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december")
@@ -150,6 +152,14 @@ CSA_vect <- terra::project(CSA_vect, crs(PH)[1])
 #            filename = "../../data/prices/CSA_market_maize_prices_2016.shp",
 #            overwrite=TRUE)
 ```
+
+Changing the coordinates in the table to the correct projection
+```{r}
+CSA$Longitude <- geom(CSA_vect)$x
+CSA$Latitude <- geom(CSA_vect)$y
+
+```
+
 
 ```{r, echo=FALSE}
 ETH_adm <- vect("F:/Work/GADM/gadm36_levels_shp/gadm36_ETH_shp/gadm36_ETH_0.shp") %>% project(crs(PH)[1])

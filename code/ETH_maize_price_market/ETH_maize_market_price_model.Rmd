@@ -199,14 +199,11 @@ Building the ensemble model using `glmnet`.
 ```{r, message=FALSE}
 set.seed(1234)
 
-model.ens <- lm(maize_Unmilled_norm ~
+model.ens <- glm(maize_Unmilled_norm ~
                   maize_Unmilled_norm.gbm + 
                   maize_Unmilled_norm.pls +
                   maize_Unmilled_norm.rf,
                 data = c.data.ens)
-
-#exporting model to rda to use later
-save(model.ens, file="../../output/models/market_price.rda")
 
 print(model.ens)
 ```
@@ -264,7 +261,7 @@ LSMS <- read.csv("../../data/prices/LSMS_maize_market_price.csv")
 #Changing Month_code to a factor
 LSMS$Month_code <- factor(LSMS$Month_code, levels=c(1:8))
 
-#AI models
+#ML models
 maize_Unmilled_norm.gbm <- predict(model.gbm, newdata = LSMS)
 #maize_Unmilled_norm.nn <- predict(model.nn, newdata = LSMS)
 maize_Unmilled_norm.pls <- predict(model.pls, newdata = LSMS)

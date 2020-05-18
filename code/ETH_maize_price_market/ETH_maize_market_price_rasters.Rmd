@@ -106,11 +106,12 @@ values(blank_raster) <- NA
 ## Prediction for all months
 ```{r}
 #Months to predict
-Month_codes <- c(1:8)
+Month_codes <- 1
+Month_factors <- c(1:8)
 for (m in Month_codes){
   #m <- 2 #to test
   #Creating the month code column with factor levels appropriate to use by models
-  stack_table$Month_code <- factor(m, levels = Month_codes)
+  stack_table$Month_code <- factor(m, levels = Month_factors)
   
   #What happens in the period after belg ends and before Meher ends in regions with Belg rains
   stack_table$rainfall_season <- stack_table$meher_season
@@ -137,6 +138,8 @@ for (m in Month_codes){
     
     writeRaster(blank_raster, filename=paste0("../../output/crop_market_price/months/ETH_maize_market_price_", model, m, ".tif"),
                 overwrite=TRUE, wopt = list(names = paste0("maize_Unmilled_norm.", model)))
+    
+    plot(blank_raster, main=model)
   }
 }
 ```
@@ -162,7 +165,7 @@ for (m in Month_codes){
   #names(Month_code) <- "Month_code"
   
   #constant month factor
-  add <- data.frame(Month_code = factor(m, levels=1:8))
+  add <- data.frame(Month_code = factor(m, levels=c(1:8)))
 
   if(m %in% c(6,7)){
     rainfall_season <- rast("../../data/rainfall/meher_maize_rainfall_seas_mean_ETH.tif")
