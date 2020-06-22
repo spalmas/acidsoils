@@ -61,7 +61,7 @@ soilrasters <- rast(soillist)
 
 ```
 
-In here we load the raster layers for Meher and Belg rainfall seasons that we will use 
+In here we load the raster layers for Average Meher and Belg rainfall seasons
 ```{r}
 meher_season <- rast("../../data/rainfall/meher_maize_rainfall_seas_mean_ETH.tif")
 belg_season <- rast("../../data/rainfall/belg_rainfall_seas_mean_ETH.tif")
@@ -92,24 +92,27 @@ stack_table <- stack_table %>%
 
 ## Un-trended normalized price value from previous month
 The prediction needs a `maize_Unmilled_norm_t0` value which is the un-trended and normalized value of the maize price on the last month.
-I'll use a normalized value of 0 to start
+
+This normalized value can reflect the trend across 
+
+I'll use a normalized value of 0 to start.
 ```{r}
 stack_table$maize_Unmilled_norm_t0 <- 0
 ```
 
-## Empty Raster to store values
-```{r}
-blank_raster <- meher_season
-values(blank_raster) <- NA
-```
-
 ## Prediction for all months
 ```{r}
+## Empty Raster to store values
+blank_raster <- meher_season
+values(blank_raster) <- NA
+
 #Months to predict
-Month_codes <- 1
-Month_factors <- c(1:8)
+Month_codes <- c(1:12)
+Month_factors <- c(1:12)
 for (m in Month_codes){
   #m <- 2 #to test
+  
+  print(paste0("Running Month: ", m))
   #Creating the month code column with factor levels appropriate to use by models
   stack_table$Month_code <- factor(m, levels = Month_factors)
   
@@ -136,18 +139,53 @@ for (m in Month_codes){
   for(model in c("gbm", "pls", "rf", "ens")){
     values(blank_raster)[stack_table$index] <- get(paste0("maize_Unmilled_norm.", model))
     
-    writeRaster(blank_raster, filename=paste0("../../output/crop_market_price/months/ETH_maize_market_price_", model, m, ".tif"),
-                overwrite=TRUE, wopt = list(names = paste0("maize_Unmilled_norm.", model)))
-    
-    plot(blank_raster, main=model)
+    writeRaster(blank_raster, filename=paste0("../../output/crop_market_price/months/", m, "/ETH_maize_market_price_", model, "_", m, "_norm.tif"),
+                overwrite=TRUE, wopt = list(gdal=c("COMPRESS=LZW"), names = paste0("maize_Unmilled_norm", model)))
   }
 }
 ```
 
+## Convert back to price units
+The prediction is de-trended and normalized. We need a standard deviation and mean to put back to original price ranges. I'll assume similar values to those found in CSA:
+```{r}
+maize_mean <- 10 
+maize_sd <- 1.7
+
+#Months to predict
+Month_codes <- c(1:12)  #Running ML models
+for (m in Month_codes){
+    for(model in c("gbm", "pls", "rf", "ens")){
+      
+      norm <- rast(paste0("../../output/crop_market_price/months/", m, "/ETH_maize_market_price_", model, "_", m,"_norm.tif"))
+      
+      #converting back    
+      back <- norm*maize_sd + maize_mean
+      
+      writeRaster(back, filename=paste0("../../output/crop_market_price/months/", m, "/ETH_maize_market_price_", model, "_", m,".tif"),
+                  overwrite=TRUE, wopt = list(gdal=c("COMPRESS=LZW"), names = paste0("maize_Unmilled_", model)))
+    }
+}
+
+
+#let's create a raster with min a max values to create the visualization parameters
+#library(terra)
+#minmax <- rast("../../output/crop_market_price/months/12/ETH_maize_market_price_ens_12.tif")
+minmax <- back
+values(minmax)[1] <- 8.5
+values(minmax)[2] <- 13.5
+writeRaster(minmax, filename="../../output/crop_market_price/ETH_maize_market_price_minmax.tif",
+            overwrite=TRUE, wopt = list(gdal=c("COMPRESS=LZW"), names = paste0("maize_Unmilled_minmax")))
+
+
+```
+
+
+
 # IV. Raster prediction using terra::predict
+This code below is not working.
 ```{r, eval=FALSE}
 #Months to predict
-Month_codes <- c(1:8)
+Month_codes <- c(1:12)
 
 #Constant raster to use for maize_Unmilled_norm_t0
 maize_Unmilled_norm_t0 <- rast("../../data/rainfall/meher_maize_rainfall_seas_mean_ETH.tif")
@@ -165,7 +203,7 @@ for (m in Month_codes){
   #names(Month_code) <- "Month_code"
   
   #constant month factor
-  add <- data.frame(Month_code = factor(m, levels=c(1:8)))
+  add <- data.frame(Month_code = factor(m, levels=c(1:12)))
 
   if(m %in% c(6,7)){
     rainfall_season <- rast("../../data/rainfall/meher_maize_rainfall_seas_mean_ETH.tif")
@@ -199,6 +237,6 @@ for (m in Month_codes){
   
   #maip_USDkg.ens <- predict(raster.data.ens, model.ens, na.rm=TRUE,
   #          filename="../../output/crop_market_price/ETH_maize_market_price_ENS.tif", overwrite=TRUE)
-
 }
 ```
+

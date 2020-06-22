@@ -6,7 +6,6 @@ output:
   pdf_document:
     toc: true
     toc_depth: 2
-
 ---
 
 ```{r setup, include=FALSE}
@@ -16,11 +15,14 @@ knitr::opts_chunk$set(echo = TRUE)
 # Introduction
 Setup for the ensemble prediction of maize market prices in Ethiopia. It creates tables for calibration and validation.
 
+Prepare the model training data (response variable and prediction variables). The response variable is composed of georeferenced point data and the prediction variables rasters in a stack; we extract values from locations with a response value in the prediction variables to create the training data. A pixel/cell value may include random errors during data collection or processing. To ensure we get a more representational value, we extract the mean of all pixel values within a 5000 meters radius (ground distance) of the response variable location. We remove any columns that have `NA` as the mean (points that fall in areas with no data).
+
 ## Packages
 We use the "sp", "raster" and "rgdal" R packages for creating and manipulating spatial data in this exercise. They are all add-on packages that have to be installed from CRAN.
 ```{r, message = FALSE}
 rm(list=ls()) 
 library(dplyr)
+library(ggplot2)
 library(rgdal)
 library(terra)
 ```
@@ -53,6 +55,13 @@ CSA$wheat_unmilled_White <- as.numeric(CSA$wheat_unmilled_White)
 ```
 
 
+```{r, echo=FALSE}
+hist(CSA$barley_unmilled_White)
+hist(CSA$maize_Unmilled)
+hist(CSA$wheat_unmilled_White)
+```
+
+
 
 ### Creating a date column
 ```{r}
@@ -65,12 +74,23 @@ CSA$Month_code <- lubridate::month(match(CSA$Month, months.name))
 CSA$Date <- as.Date(with(CSA, paste(Year, Month_code, 1,sep="-")), "%Y-%m-%d")
 ```
 
-## 2) Correcting temporal trend
+## 2) Description of the dataset
+```{r}
+table(CSA$Year, CSA$Month)
+paste0("Markets: ", length(unique(CSA$Market)))
 
-We eliminate the temporal trend and scale it back by doing a z-transformation using the mean and sd of each year and month.
+paste0("Maize measurements: ", unique(CSA$Year))
+
+```
+
+
+
+
+## 3) Correcting temporal trend and normalizing
+There is a trend in prices across time. We eliminate the temporal trend by doing a z-transformation using the mean and sd of each year.
 ```{r}
 CSA_summary_price <- CSA %>% 
-  group_by(Year, Month_code) %>% 
+  group_by(Year) %>% 
   summarise(barley_unmilled_White_mean = mean(barley_unmilled_White, na.rm=TRUE),
             maize_Unmilled_mean = mean(maize_Unmilled, na.rm=TRUE),
             wheat_unmilled_White_mean = mean(wheat_unmilled_White, na.rm=TRUE),
@@ -80,7 +100,7 @@ CSA_summary_price <- CSA %>%
             wheat_unmilled_White_sd = sd(wheat_unmilled_White, na.rm=TRUE))
 
 #joining the data to the CSA
-CSA <- left_join(CSA, CSA_summary_price, by = c("Year", "Month_code"))
+CSA <- left_join(CSA, CSA_summary_price, by = c("Year"))
 
 #Z-score standardization
 CSA <- CSA %>%
@@ -90,7 +110,38 @@ CSA <- CSA %>%
 
 ```
 
-## 3) Adding previous month price as column
+### Standard deviation and mean used for conversion
+```{r, echo=FALSE}
+CSA_summary_price_mean <- CSA_summary_price %>% 
+  dplyr::select(Year, barley_unmilled_White_mean, maize_Unmilled_mean, wheat_unmilled_White_mean) %>%
+  rename(barley = barley_unmilled_White_mean, maize = maize_Unmilled_mean, wheat = wheat_unmilled_White_mean) %>% 
+  tidyr::pivot_longer(cols = c("barley", "maize", "wheat"), names_to = "crop", values_to = "mean_price")
+
+CSA_summary_price_sd <- CSA_summary_price %>% 
+  dplyr::select(Year, barley_unmilled_White_sd, maize_Unmilled_sd, wheat_unmilled_White_sd) %>% 
+  rename(barley = barley_unmilled_White_sd, maize = maize_Unmilled_sd, wheat = wheat_unmilled_White_sd) %>% 
+  tidyr::pivot_longer(cols = c("barley", "maize", "wheat"), names_to = "crop", values_to = "sd_price")
+
+g_mean <- ggplot(CSA_summary_price_mean, aes(x=Year, y=mean_price, color = crop)) +
+  geom_line()
+g_sd <- ggplot(CSA_summary_price_sd, aes(x=Year, y=sd_price, color = crop)) +
+  geom_line()
+
+g_mean
+g_sd
+```
+
+
+```{r, echo=FALSE}
+hist(CSA$barley_unmilled_White_norm, main = "Barley Normalized/de-trended price")
+hist(CSA$maize_Unmilled_norm, main = "Maize Normalized/de-trended price")
+hist(CSA$wheat_unmilled_White_norm, main = "Wheat Normalized/de-trended price")
+```
+
+
+
+
+## 4) Adding previous month price as column
 We need to match the previous month prices from each market to each row.
 
 Because of the many rules, I'll do this in a for loop even though it is slow.
@@ -102,9 +153,8 @@ CSA$maize_Unmilled_norm_t0 <- NA
 CSA$wheat_unmilled_White_norm_t0 <- NA
 
 for (r in 1:nrow(CSA)){
-  #r <- 1 #to test
+  #r <- 18 #to test
   Market1 <- CSA$Market[r]
-  
   Month_code1 <- CSA$Month_code[r]
   Year1 <- CSA$Year[r]
   
@@ -112,10 +162,11 @@ for (r in 1:nrow(CSA)){
     Month_code0 <- 12
     Year0 <- Year1 - 1
   } else {
-    Month_code0 <- Month_code0 - 1
+    Month_code0 <- Month_code1 - 1
     Year0 <- Year1
   }
   
+  #filtering to that specific month/year
   CSA0 <- CSA %>% filter(Market == Market1 & Month_code == Month_code0 & Year == Year0)
   
   if(nrow(CSA0) != 0){
@@ -126,7 +177,27 @@ for (r in 1:nrow(CSA)){
 }
 ```
 
-## 4) Creating spatial object from the CSA data
+### Is there a trend of t0 across the year?
+```{r, echo=FALSE}
+CSA_t0_trend <- CSA %>% 
+  dplyr::select(Date, barley_unmilled_White_norm_t0, maize_Unmilled_norm_t0, wheat_unmilled_White_norm_t0) %>%
+  mutate(month = lubridate::month(Date)) %>% 
+  rename(barley = barley_unmilled_White_norm_t0, maize = maize_Unmilled_norm_t0, wheat = wheat_unmilled_White_norm_t0) %>% 
+  tidyr::pivot_longer(cols = c("barley", "maize", "wheat"), names_to = "crop", values_to = "t0_norm_price")
+
+ggplot(CSA_t0_trend, aes(x=month, y=t0_norm_price, color=crop, fill=crop))+
+ stat_summary(aes(y = t0_norm_price, color=crop, group=crop), fun.y=mean, geom="line")
+
+CSA_t0_trend %>% 
+  dplyr::select(-Date) %>% 
+  group_by(crop, month) %>% 
+  summarise(t0_norm_price_mean = mean(t0_norm_price, na.rm=T)) %>% 
+  tidyr::pivot_wider(values_from=t0_norm_price_mean, names_from=crop)
+
+```
+
+
+## 5) Creating spatial object from the CSA data
 
 Now that we have a dataset will full coordinates and prices, I'll create a shapefile to extract the values from the rasterstack.
 
@@ -274,6 +345,10 @@ rasterlist <- list.files(path = "F:/Work/MarkusStacks/ET_250m_2019/ET_500m_2019_
                          pattern = "*.tif$", 
                          full.names = TRUE) # Character vector of relative filepaths
 
+
+#some of the rasters are not defined. I'll delete those
+rasterlist <- rasterlist[-c(7, 8, 14, 28, 35)]
+
 #eliminate lat long rasters because coordinates where already in CSA dataset
 lat_raster <- grep("lat.tif", rasterlist)
 rasterlist <- rasterlist[-lat_raster]
@@ -290,10 +365,6 @@ CSA <- cbind(CSA,
                             #buffer=5000, # Meters
                             drop=TRUE))
 ```
-
-
-
-
 
 
 # III. ADDING SEASONAL RAINFALL DATA FROM
@@ -466,14 +537,14 @@ CSA_barley <- CSA %>%
                 barley_unmilled_White_norm_t0,
                 Month_code, Longitude, Latitude,
                 BIO1, BIO12, BIO15, BIO7, CEC,
-                DCELL, DGRID, DNFPA, DOR1, DOR2, DOWS, DPOP1, DPOP2, DWRES,
+                DCELL, DOR1, DOR2, DOWS, DPOP1, DPOP2,
                 EVI, LCS, LCT, LCU, LSTD, LSTN,
-                MB1, MB2, MB3, MB7, MDEM, NLT, NPPA, NPPS,
-                PARA, PARV, PH, S1VV, S2B08, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP,
+                MB1, MB2, MB3, MB7, MDEM, NPPA, NPPS,
+                PARA, PARV, PH, S1VV, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP,
                 rainfall_season,
                 #meher_rainfall_seas, belg_rainfall_seas, meher_wheat_rainfall_seas,
                 #lagrainfall3, lagrainfall6,
-                Region) %>% 
+                Region, Year) %>% 
   filter(complete.cases(.))
 
 CSA_maize <- CSA %>% 
@@ -482,14 +553,14 @@ CSA_maize <- CSA %>%
                 maize_Unmilled_norm_t0,
                 Month_code, Longitude, Latitude,
                 BIO1, BIO12, BIO15, BIO7, CEC,
-                DCELL, DGRID, DNFPA, DOR1, DOR2, DOWS, DPOP1, DPOP2, DWRES,
+                DCELL, DOR1, DOR2, DOWS, DPOP1, DPOP2,
                 EVI, LCS, LCT, LCU, LSTD, LSTN,
-                MB1, MB2, MB3, MB7, MDEM, NLT, NPPA, NPPS,
-                PARA, PARV, PH, S1VV, S2B08, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP,
+                MB1, MB2, MB3, MB7, MDEM, NPPA, NPPS,
+                PARA, PARV, PH, S1VV, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP,
                 rainfall_season,
                 #meher_rainfall_seas, belg_rainfall_seas, meher_wheat_rainfall_seas,
                 #lagrainfall3, lagrainfall6,
-                Region) %>% 
+                Region, Year) %>% 
   filter(complete.cases(.))
 
 
@@ -499,14 +570,14 @@ CSA_wheat <- CSA %>%
                 wheat_unmilled_White_norm_t0,
                 Month_code, Longitude, Latitude,
                 BIO1, BIO12, BIO15, BIO7, CEC,
-                DCELL, DGRID, DNFPA, DOR1, DOR2, DOWS, DPOP1, DPOP2, DWRES,
+                DCELL, DOR1, DOR2, DOWS, DPOP1, DPOP2,
                 EVI, LCS, LCT, LCU, LSTD, LSTN,
-                MB1, MB2, MB3, MB7, MDEM, NLT, NPPA, NPPS,
-                PARA, PARV, PH, S1VV, S2B08, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP,
+                MB1, MB2, MB3, MB7, MDEM, NPPA, NPPS,
+                PARA, PARV, PH, S1VV, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP,
                 rainfall_season,
                 #meher_rainfall_seas, belg_rainfall_seas, meher_wheat_rainfall_seas,
                 #lagrainfall3, lagrainfall6,
-                Region) %>% 
+                Region, Year) %>% 
   filter(complete.cases(.))
 
 ```

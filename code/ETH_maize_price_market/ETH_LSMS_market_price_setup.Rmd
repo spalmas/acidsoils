@@ -64,19 +64,19 @@ hist(LSMS_maize$maip_ETBkg[LSMS_maize$maip_ETBkg > 15], main = "very high estima
 
 #bring back those outliers to original calculation to see if they fit
 LSMS_maize$maip_ETBkg[LSMS_maize$maip_ETBkg < 2] <- LSMS_maize$cs10a2q05[LSMS_maize$maip_ETBkg < 2] / LSMS_maize$cs10a2q04[LSMS_maize$maip_ETBkg < 2]
-LSMS_maize$maip_ETBkg[LSMS_maize$maip_ETBkg > 15] <- LSMS_maize$cs10a2q05[LSMS_maize$maip_ETBkg > 15] / LSMS_maize$cs10a2q04[LSMS_maize$maip_ETBkg > 15]
+LSMS_maize$maip_ETBkg[LSMS_maize$maip_ETBkg > 10] <- LSMS_maize$cs10a2q05[LSMS_maize$maip_ETBkg > 10] / LSMS_maize$cs10a2q04[LSMS_maize$maip_ETBkg > 10]
 
 #Which lines are still outliers?
-LSMS_maize[(LSMS_maize$maip_ETBkg < 2 | LSMS_maize$maip_ETBkg > 15),]
+LSMS_maize[(LSMS_maize$maip_ETBkg < 2 | LSMS_maize$maip_ETBkg > 10),]
 
 #these most likely reported the quantity in grams erroneously
-LSMS_maize$maip_ETBkg[(LSMS_maize$maip_ETBkg < 2 | LSMS_maize$maip_ETBkg > 15)] <- LSMS_maize$cs10a2q05[(LSMS_maize$maip_ETBkg < 2 | LSMS_maize$maip_ETBkg > 15)] / (LSMS_maize$cs10a2q04[(LSMS_maize$maip_ETBkg < 2 | LSMS_maize$maip_ETBkg > 15)]/1000)
+LSMS_maize$maip_ETBkg[(LSMS_maize$maip_ETBkg < 2 | LSMS_maize$maip_ETBkg > 10)] <- LSMS_maize$cs10a2q05[(LSMS_maize$maip_ETBkg < 2 | LSMS_maize$maip_ETBkg > 10)] / (LSMS_maize$cs10a2q04[(LSMS_maize$maip_ETBkg < 2 | LSMS_maize$maip_ETBkg > 10)]/1000)
 
 #Which lines are still outliers?
 LSMS_maize[(LSMS_maize$maip_ETBkg < 2 | LSMS_maize$maip_ETBkg > 15),]
 
 #Let's just remove these values
-LSMS_maize <- LSMS_maize %>% filter(maip_ETBkg > 2 & maip_ETBkg < 15)
+LSMS_maize <- LSMS_maize %>% filter(maip_ETBkg > 2 & maip_ETBkg < 10)
 
 #Final distribution in ETB/kg
 hist(LSMS_maize$maip_ETBkg)
@@ -169,6 +169,9 @@ rasterlist <- list.files(path = "F:/Work/MarkusStacks/ET_250m_2019/ET_500m_2019_
                          pattern = "*.tif$", 
                          full.names = TRUE) # Character vector of relative filepaths
 
+#some of the rasters are not defined. I'll delete those
+rasterlist <- rasterlist[-c(7, 8, 14, 28, 35)]
+
 #creating rasterstack
 rasterstack <- rast(rasterlist)
 ```
@@ -178,7 +181,7 @@ rasterstack <- rast(rasterlist)
 
  prepare the model training data (response variable and prediction variables). The response variable is composed of georeferenced point data and the prediction variables rasters in a stack; we extract values from locations with a response value in the prediction variables to create the training data. A pixel/cell value may include random errors during data collection or processing. To ensure we get a more representational value, we extract the mean of all pixel values within a 5000 meters radius (ground distance) of the response variable location. We remove any columns that have `NA` as the mean (points that fall in areas with no data).
 ```{r}
-LSMS_maize <- data.frame(maize_Unmilled_norm = LSMS_maize$maize_Unmilled_norm)
+LSMS_maize <- data.frame(maize_Unmilled_norm = LSMS_maize$maize_Unmilled_norm, maip_ETBkg = LSMS_maize$maip_ETBkg)
 #extracting values within a raster
 LSMS_maize = cbind(LSMS_maize,
                    terra::extract(rasterstack, 
@@ -208,7 +211,7 @@ results <- rep(NA, times = nrow(LSMS_maize))
 
 #chirps dataset is in a different projection
 LSMS_vect_forchirps <- LSMS_maize_vect
-LSMS_vect_forchirps <- project(LSMS_vect_forchirps, "+proj=longlat +datum=WGS84 +no_defs")
+LSMS_vect_forchirps <- terra::project(LSMS_vect_forchirps, "+proj=longlat +datum=WGS84 +no_defs")
 
 #Rainfall rasters for that season
 rainfall_season_rasters <- rast(apply(expand.grid("F:/Work/CHIRPS/ftp.chg.ucsb.edu/pub/org/chg/products/CHIRPS-2.0/africa_dekad/tifs/chirps-v2.0.2015.", kiremt_rainfall_seas, ".", dekads, ".tif"), 1, paste, collapse=""))
@@ -237,11 +240,11 @@ LSMS_maize.complete <- LSMS_maize %>%
                 maize_Unmilled_norm_t0,
                 Month_code, Longitude, Latitude,
                 BIO1, BIO12, BIO15, BIO7, CEC,
-                DCELL, DGRID, DNFPA, DOR1, DOR2, DOWS, DPOP1, DPOP2, DWRES,
+                DCELL, DOR1, DOR2, DOWS, DPOP1, DPOP2,
                 EVI, LCS, LCT, LCU, LSTD, LSTN,
-                MB1, MB2, MB3, MB7, MDEM, NLT, NPPA, NPPS,
-                PARA, PARV, PH, S1VV, S2B08, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP,
-                rainfall_season,) %>% 
+                MB1, MB2, MB3, MB7, MDEM, NPPA, NPPS,
+                PARA, PARV, PH, S1VV, S2B11, S2B12, SLOPE, SND, SOC, TIM, WPOP,
+                rainfall_season, maip_ETBkg) %>% 
   filter(complete.cases(.))### keeping only points with complete information
 ```
 

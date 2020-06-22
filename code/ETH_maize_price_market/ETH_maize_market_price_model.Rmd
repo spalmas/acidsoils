@@ -43,16 +43,13 @@ CSA$Month_code <- factor(CSA$Month_code)
 
 
 ## Calibration and validation datasets
+CSA data spans from July/2013 to May/2019. The calibration data will be  all data until May 2018 and the validation dataset will be all that remains (i.e. the last year).
 
-Prepare the model training data (response variable and prediction variables). The response variable is composed of georeferenced point data and the prediction variables rasters in a stack; we extract values from locations with a response value in the prediction variables to create the training data. A pixel/cell value may include random errors during data collection or processing. To ensure we get a more representational value, we extract the mean of all pixel values within a 5000 meters radius (ground distance) of the response variable location. We remove any columns that have `NA` as the mean (points that fall in areas with no data).
 
 ```{r}
 # Training/Test set partition ---------------------------------------------
-set.seed(1234)
-cal <- sample(x = nrow(CSA), size = round(0.8*nrow(CSA))) 
-
-c.data <- CSA[cal, ] ## calibration data
-v.data <- CSA[-cal, ] ## validation data
+c.data <- CSA[CSA$Year %in% c(2013:2017) | (CSA$Year == 2018 & CSA$Month_code %in% c(1:5)), ]
+v.data <- CSA[CSA$Year == 2019 | (CSA$Year == 2018 & CSA$Month_code %in% c(6:12)), ]
 ```
 
 # II. FITTING INDIVIDUAL MODELS
@@ -79,10 +76,11 @@ library(randomForest)
 ```{r}
 # Control setup
 set.seed(1234)
-tc <- trainControl(method = "cv", number=10)
+tc <- trainControl(method = "cv",
+                   number=10)   #10-fold Cross Validation
 
 #Traning model
-model.gbm <- train(x = c.data[,2:46], y = c.data[,1], 
+model.gbm <- train(x = c.data[,2:41], y = c.data[,1], 
                    method = "gbm", 
                    preProc = c("center", "scale"),
                    trControl = tc,
@@ -102,10 +100,11 @@ plot(v.imp.gbm, top=28)
 ## B) Neural network
 ```{r, message=FALSE, warning=FALSE, eval=FALSE}
 set.seed(1234)
-tc <- trainControl(method = "cv", number = 10)
+tc <- trainControl(method = "cv", 
+                   number = 10)   #10-fold Cross Validation
 
 #Traning model
-model.nn <- train(c.data[,2:46], c.data[,1], 
+model.nn <- train(c.data[,2:41], c.data[,1], 
                   method = "dnn", 
                   preProc = c("center", "scale"), 
                   trControl = tc,
@@ -127,10 +126,11 @@ plot(v.imp.nn, top=28)
 ## C) PLS Regression
 ```{r}
 set.seed(1234)
-tc <- trainControl(method = "cv", number = 10)
+tc <- trainControl(method = "cv", 
+                   number = 10)   #10-fold Cross Validation
 
 #Traning model
-model.pls <- train(c.data[,2:46], c.data[,1], 
+model.pls <- train(c.data[,2:41], c.data[,1], 
                    method = "pls", 
                    preProc = c("center", "scale"),
                    tuneGrid = expand.grid(ncomp = 1:10),
@@ -152,10 +152,10 @@ By "tune the forest", we mean the process of determining the optimal number of v
 ```{r}
 # Control setup
 set.seed(1234)
-tc <- trainControl(method = "oob")
+tc <- trainControl(method = "oob")  #out of bag error for random forests
 
 #Traning model
-model.rf <- train(c.data[,2:46], c.data[,1], 
+model.rf <- train(c.data[,2:41], c.data[,1], 
                   method = "rf",
                   preProc = c("center", "scale"),
                   trControl = tc)
@@ -182,6 +182,16 @@ reg.avg <- c.data %>% group_by(Region,Month_code) %>%
 c.data.withavg <- left_join(c.data, nat.avg, by=c("Month_code")) %>% left_join(reg.avg, by=c("Region", "Month_code"))
 ```
 
+## E) Linear Regression model
+I'll compare all models to a linear regression that only includes month dummies, pop density, distance from Addis, latitude and longitude? 
+```{r}
+#average models
+lm1 <- lm(maize_Unmilled_norm ~ Month_code + WPOP + DPOP1 + Longitude + Latitude, data = c.data)
+
+summary(lm1)
+```
+
+
 # III. ENSEMBLE FITTING
 The ensemble fitting is using the validation dataset because predictions on data that have been used for the training of the weak learners are not relevant for the training of the meta-model. 
 
@@ -200,19 +210,20 @@ Building the ensemble model using `glmnet`.
 set.seed(1234)
 
 model.ens <- glm(maize_Unmilled_norm ~
-                  maize_Unmilled_norm.gbm + 
-                  maize_Unmilled_norm.pls +
-                  maize_Unmilled_norm.rf,
-                data = c.data.ens)
+                   maize_Unmilled_norm.gbm + 
+                   maize_Unmilled_norm.pls +
+                   maize_Unmilled_norm.rf,
+                 data = c.data.ens)
 
 print(model.ens)
 ```
 
 
-```{r, echo=FALSE}
-par(mfrow=c(3,2))
+```{r, echo=FALSE, fig.height=8}
+par(mfrow=c(4,2))
 plot_fitness(obs = c.data.withavg$maize_Unmilled_norm, pred = c.data.withavg$maize_Unmilled_norm_nat.avg, name = "Cal: National monthly avg.")
 plot_fitness(obs = c.data.withavg$maize_Unmilled_norm, pred = c.data.withavg$maize_Unmilled_norm_reg.avg, name = "Cal: Regional monthly avg.")
+plot_fitness(obs = c.data$maize_Unmilled_norm, pred = predict(lm1), name = "Cal: LM")
 plot_fitness(obs = c.data$maize_Unmilled_norm, pred = predict(model.gbm), name = "Cal: GBM")
 plot_fitness(obs = c.data$maize_Unmilled_norm, pred = predict(model.pls), name = "Cal: PLS")
 plot_fitness(obs = c.data$maize_Unmilled_norm, pred = predict(model.rf), name = "Cal: RF")
@@ -230,61 +241,187 @@ We will use the validation dataset to check the prediction.
 #Average models
 v.data.withavg <- left_join(v.data, nat.avg, by=c("Month_code")) %>% left_join(reg.avg, by=c("Region", "Month_code"))
 
-#AI models
-maize_Unmilled_norm.gbm <- predict(model.gbm, newdata = v.data)
+#ML models
+v.maize_Unmilled_norm.gbm <- predict(model.gbm, newdata = v.data)
 #maip_USDkg.nn <- predict(model.nn, newdata = v.data)
-maize_Unmilled_norm.pls <- predict(model.pls, newdata = v.data)
-maize_Unmilled_norm.rf <- predict(model.rf, newdata = v.data)
+v.maize_Unmilled_norm.pls <- predict(model.pls, newdata = v.data)
+v.maize_Unmilled_norm.rf <- predict(model.rf, newdata = v.data)
 
 #Putting together ensemble results to a table
-v.data.ens <- data.frame(maize_Unmilled_norm.gbm,
-                         maize_Unmilled_norm.pls,
-                         maize_Unmilled_norm.rf)
+v.data.ens <- data.frame(maize_Unmilled_norm.gbm = v.maize_Unmilled_norm.gbm,
+                         maize_Unmilled_norm.pls = v.maize_Unmilled_norm.pls,
+                         maize_Unmilled_norm.rf = v.maize_Unmilled_norm.rf)
 
 #running ensemble model
-maize_Unmilled_norm.ens <- predict(model.ens, v.data.ens)
+v.maize_Unmilled_norm.ens <- predict(model.ens, v.data.ens)
 ```
 
-```{r, echo=FALSE}
-par(mfrow=c(3,2))
+```{r, echo=FALSE, fig.height=8}
+par(mfrow=c(4,2))
 plot_fitness(obs = v.data.withavg[,1], pred = v.data.withavg$maize_Unmilled_norm_nat.avg, name = "Val: National monthly avg.")
 plot_fitness(obs = v.data.withavg[,1], pred = v.data.withavg$maize_Unmilled_norm_reg.avg, name = "Val: Regional monthly avg.")
-plot_fitness(obs = v.data$maize_Unmilled_norm, pred = maize_Unmilled_norm.gbm, name = "Val: GBM")
-plot_fitness(obs = v.data$maize_Unmilled_norm, pred = maize_Unmilled_norm.pls, name = "Val: PLS")
-plot_fitness(obs = v.data$maize_Unmilled_norm, pred = maize_Unmilled_norm.rf, name = "Val: RF")
-plot_fitness(obs = v.data$maize_Unmilled_norm, pred = maize_Unmilled_norm.ens, name = "Val: Ensemble")
+plot_fitness(obs = v.data$maize_Unmilled_norm, pred = predict(lm1, newdata=v.data), name = "Val: LM")
+plot_fitness(obs = v.data$maize_Unmilled_norm, pred = v.maize_Unmilled_norm.gbm, name = "Val: GBM")
+plot_fitness(obs = v.data$maize_Unmilled_norm, pred = v.maize_Unmilled_norm.pls, name = "Val: PLS")
+plot_fitness(obs = v.data$maize_Unmilled_norm, pred = v.maize_Unmilled_norm.rf, name = "Val: RF")
+plot_fitness(obs = v.data$maize_Unmilled_norm, pred = v.maize_Unmilled_norm.ens, name = "Val: Ensemble")
 ```
 ## IV.II Prediction on LSMS
 ```{r}
 LSMS <- read.csv("../../data/prices/LSMS_maize_market_price.csv")
 
 #Changing Month_code to a factor
-LSMS$Month_code <- factor(LSMS$Month_code, levels=c(1:8))
+LSMS$Month_code <- factor(LSMS$Month_code, levels=c(1:12))
 
 #ML models
-maize_Unmilled_norm.gbm <- predict(model.gbm, newdata = LSMS)
+v2.maize_Unmilled_norm.gbm <- predict(model.gbm, newdata = LSMS)
 #maize_Unmilled_norm.nn <- predict(model.nn, newdata = LSMS)
-maize_Unmilled_norm.pls <- predict(model.pls, newdata = LSMS)
-maize_Unmilled_norm.rf <- predict(model.rf, newdata = LSMS)
+v2.maize_Unmilled_norm.pls <- predict(model.pls, newdata = LSMS)
+v2.maize_Unmilled_norm.rf <- predict(model.rf, newdata = LSMS)
 
 #Putting together ensemble results to a table
-v.data.ens <- data.frame(maize_Unmilled_norm.gbm,
-                         maize_Unmilled_norm.pls,
-                         maize_Unmilled_norm.rf)
+v2.data.ens <- data.frame(maize_Unmilled_norm.gbm = v2.maize_Unmilled_norm.gbm,
+                          maize_Unmilled_norm.pls = v2.maize_Unmilled_norm.pls,
+                          maize_Unmilled_norm.rf = v2.maize_Unmilled_norm.rf)
 
 #running ensemble model
-maize_Unmilled_norm.ens <- predict(model.ens, v.data.ens)
+v2.maize_Unmilled_norm.ens <- predict(model.ens, v2.data.ens)
 ```
+
+```{r, echo=FALSE, fig.height=8}
+par(mfrow=c(3,2))
+plot_fitness(obs = LSMS$maize_Unmilled_norm, pred = predict(lm1, newdata=LSMS), name = "LSMS Val: LR")
+plot_fitness(obs = LSMS$maize_Unmilled_norm, pred = v2.maize_Unmilled_norm.gbm, name = "LSMS Val: GBM")
+plot_fitness(obs = LSMS$maize_Unmilled_norm, pred = v2.maize_Unmilled_norm.pls, name = "LSMS Val: PLS")
+plot_fitness(obs = LSMS$maize_Unmilled_norm, pred = v2.maize_Unmilled_norm.rf, name = "LSMSVal: RF")
+plot_fitness(obs = LSMS$maize_Unmilled_norm, pred = v2.maize_Unmilled_norm.ens, name = "LSMSVal: Ensemble")
+```
+
+# V. TABLES AND PLOTS FOR MANUSCRIPT
+## V.1 TABLE OF RMSE AND R2 FOR PAPER 
 
 ```{r, echo=FALSE}
-par(mfrow=c(2,2))
-plot_fitness(obs = LSMS$maize_Unmilled_norm, pred = maize_Unmilled_norm.gbm, name = "Val: GBM")
-plot_fitness(obs = LSMS$maize_Unmilled_norm, pred = maize_Unmilled_norm.pls, name = "Val: PLS")
-plot_fitness(obs = LSMS$maize_Unmilled_norm, pred = maize_Unmilled_norm.rf, name = "Val: RF")
-plot_fitness(obs = LSMS$maize_Unmilled_norm, pred = maize_Unmilled_norm.ens, name = "Val: Ensemble")
+rmse_table <- as_tibble(matrix(nrow=4, ncol = 6))
+colnames(rmse_table) <- c("model", "RMSE-Cal", "r2-Cal", "RMSE-Val", "r2-Val", "RMSE-Val2", "r2-Val2")
+rmse_table$model <- c("PLS", "GBM", "RF", "ENS")
+
+
+rmse_table$`RMSE-Cal` <- c(RMSE(c.data$maize_Unmilled_norm, predict(model.gbm)) %>% round(digits=3),
+                           RMSE(c.data$maize_Unmilled_norm, predict(model.pls)) %>% round(digits=3),
+                           RMSE(c.data$maize_Unmilled_norm, predict(model.rf)) %>% round(digits=3),
+                           RMSE(c.data$maize_Unmilled_norm, predict(model.ens)) %>% round(digits=3))
+
+rmse_table$`RMSE-Val` <- c(RMSE(v.data$maize_Unmilled_norm, pred = v.maize_Unmilled_norm.gbm) %>% round(digits=3),
+                           RMSE(v.data$maize_Unmilled_norm, pred = v.maize_Unmilled_norm.pls) %>% round(digits=3),
+                           RMSE(v.data$maize_Unmilled_norm, pred = v.maize_Unmilled_norm.rf) %>% round(digits=3),
+                           RMSE(v.data$maize_Unmilled_norm, pred = v.maize_Unmilled_norm.ens) %>% round(digits=3))
+
+rmse_table$`RMSE-Val2` <- c(RMSE(LSMS$maize_Unmilled_norm, pred = v2.maize_Unmilled_norm.gbm) %>% round(digits=3),
+                            RMSE(LSMS$maize_Unmilled_norm, pred = v2.maize_Unmilled_norm.pls) %>% round(digits=3),
+                            RMSE(LSMS$maize_Unmilled_norm, pred = v2.maize_Unmilled_norm.rf) %>% round(digits=3),
+                            RMSE(LSMS$maize_Unmilled_norm, pred = v2.maize_Unmilled_norm.ens) %>% round(digits=3))
+
+rmse_table$`r2-Cal` <- c(rsq(c.data$maize_Unmilled_norm, predict(model.gbm)) %>% round(digits=3),
+                         rsq(c.data$maize_Unmilled_norm, predict(model.pls)) %>% round(digits=3),
+                         rsq(c.data$maize_Unmilled_norm, predict(model.rf)) %>% round(digits=3),
+                         rsq(v.data$maize_Unmilled_norm, predict(model.ens)) %>% round(digits=3))
+
+rmse_table$`r2-Val` <- c(rsq(v.data$maize_Unmilled_norm, pred = v.maize_Unmilled_norm.gbm) %>% round(digits=3),
+                         rsq(v.data$maize_Unmilled_norm, pred = v.maize_Unmilled_norm.pls) %>% round(digits=3),
+                         rsq(v.data$maize_Unmilled_norm, pred = v.maize_Unmilled_norm.rf) %>% round(digits=3),
+                         rsq(v.data$maize_Unmilled_norm, pred = v.maize_Unmilled_norm.ens) %>% round(digits=3))
+
+rmse_table$`r2-Val2` <- c(rsq(LSMS$maize_Unmilled_norm, pred = v2.maize_Unmilled_norm.gbm) %>% round(digits=3),
+                          rsq(LSMS$maize_Unmilled_norm, pred = v2.maize_Unmilled_norm.pls) %>% round(digits=3),
+                          rsq(LSMS$maize_Unmilled_norm, pred = v2.maize_Unmilled_norm.rf) %>% round(digits=3),
+                          rsq(LSMS$maize_Unmilled_norm, pred = v2.maize_Unmilled_norm.ens) %>% round(digits=3))
+
+write.table(x = rmse_table, file = "../../output/crop_market_price/models_RMSE_r2.csv", sep = ",", row.names = FALSE)
+print(rmse_table)
 ```
 
-# V. EXPORTING MODELS TO USE IN RASTER PRICE PREDICTION
+## V.2 SCATTERPLOTS
+
+```{r, echo=FALSE}
+library(ggpubr)
+
+g.gbm <- ggplot() + 
+  geom_point(aes(x = c.data$maize_Unmilled_norm, y = predict(model.gbm)), alpha = 0.3) +
+  theme_classic() + 
+  #xlim(20, 15) + ylim()
+  ggtitle("GBM") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  geom_abline(slope = 1, intercept = 0)
+
+g.pls <- ggplot() + 
+  geom_point(aes(x = c.data$maize_Unmilled_norm, y = predict(model.pls)), alpha = 0.3) +
+  theme_classic() + 
+  #xlim(20, 15) + ylim()
+  ggtitle("PLS") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  geom_abline(slope = 1, intercept = 0)
+
+g.rf <- ggplot() + 
+  geom_point(aes(x = c.data$maize_Unmilled_norm, y = predict(model.rf)), alpha = 0.3) +
+  theme_classic() + 
+  #xlim(20, 15) + ylim()
+  ggtitle("RF") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  geom_abline(slope = 1, intercept = 0)
+
+g.ens <- ggplot() + 
+  geom_point(aes(x = v.data$maize_Unmilled_norm, y = predict(model.ens)), stroke=0, alpha = 0.3) +
+  theme_classic() + 
+  #xlim(20, 15) + ylim()
+  ggtitle("Ensemble") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  geom_abline(slope = 1, intercept = 0)
+
+
+g <- ggarrange(g.gbm, g.pls, g.rf, g.ens, ncol=2, nrow =2)
+g
+ggexport(g, filename = "../../output/plots/scatterplot_cal.tiff",
+         width = 500, height = 500)
+```
+
+
+
+```{r}
+g.gbm <- ggplot() + 
+  geom_point(aes(x = LSMS$maize_Unmilled_norm, y = v2.maize_Unmilled_norm.gbm), alpha = 0.3) +
+  theme_classic() + 
+  #xlim(20, 15) + ylim()
+  ggtitle("GBM") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  geom_abline(slope = 1, intercept = 0)
+
+g.pls <- ggplot() + 
+  geom_point(aes(x = LSMS$maize_Unmilled_norm, y = v2.maize_Unmilled_norm.pls), alpha = 0.3) +
+  theme_classic() + 
+  #xlim(20, 15) + ylim()
+  ggtitle("PLS") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  geom_abline(slope = 1, intercept = 0)
+
+g.rf <- ggplot() + 
+  geom_point(aes(x = LSMS$maize_Unmilled_norm, y = v2.maize_Unmilled_norm.rf), alpha = 0.3) +
+  theme_classic() + 
+  #xlim(20, 15) + ylim()
+  ggtitle("RF") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  geom_abline(slope = 1, intercept = 0)
+
+g.ens <- ggplot() + 
+  geom_point(aes(x = LSMS$maize_Unmilled_norm, y = v2.maize_Unmilled_norm.ens), alpha = 0.3) +
+  theme_classic() + 
+  #xlim(20, 15) + ylim()
+  ggtitle("Ensemble") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  geom_abline(slope = 1, intercept = 0)
+
+
+g <- ggarrange(g.gbm, g.pls, g.rf, g.ens, ncol=2, nrow =2)
+g
+
+ggexport(g, filename = "../../output/plots/scatterplot_val.tiff",
+         width = 500, height = 500)
+```
+
+
+
+# VI. EXPORTING MODELS TO USE IN RASTER PRICE PREDICTION
 ```{r}
 save(model.gbm, file="../../output/models/maip_USDkg_gbm.rda")
 save(model.pls, file="../../output/models/maip_USDkg_pls.rda")

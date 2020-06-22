@@ -6,7 +6,6 @@
 #unzip all files
 #for z in *.zip; do unzip "$z"; done
 
-
 ################################################################################
 ############### RESAMPLE MARKUS STACK FOR ETHIOPIA TO 500m
 ################################################################################
@@ -236,6 +235,15 @@ gdalwarp -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to
     /mnt/f/work/files.isric.org/public/afsis250m/af_PHIHOX_T__M_sd1_250m.tif \
     /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/afsis250m/af_PHIHOX_T__M_sd1_250m_SSA.tif
 
+#Getting acidsoils layer
+gdal_calc.py -A /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/afsis250m/af_PHIHOX_T__M_sd1_250m_SSA.tif \
+    --outfile=/mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/afsis250m/af_PHIHOX_T__M_sd1_250m_SSA_under56.tif \
+    --calc="A<56"
+
+gdalinfo /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/afsis250m/af_PHIHOX_T__M_sd1_250m_SSA_under56.tif
+
+
+#Ph layer only for Ethiopia
 gdalwarp -cutline /mnt/f/Work/GADM/gadm36_levels_shp/gadm36_ETH_shp/gadm36_ETH_0.shp -crop_to_cutline \
     -t_srs '+proj=laea +lat_0=5 +lon_0=20 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs' -tr 500 500 \
     -of GTiff -co compress=lzw -overwrite \
@@ -271,12 +279,20 @@ gdalwarp -s_srs EPSG:4326 -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simpli
 
 ########################################
 #ESACCI-LC-L4
-#the original file is way to big for FAT32
+#the original file is way to big for FAT32 system of external harddrive
+#WE take the mode 
 ########################################
-gdalwarp -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
+gdalwarp -t_srs EPSG:4326 -ts 28616 30838 -r mode \
+    -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
     -of GTiff -co compress=lzw -overwrite \
-    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/croplands/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif \
-    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/croplands/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0_SSA.tif
+    /mnt/d/LargeFiles/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0.tif \
+    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/croplands/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0_SSA.tif
+
+#Getting cropland layer
+gdal_calc.py -A /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/croplands/ESACCI-LC-L4-LC10-Map-20m-P1Y-2016-v1.0_SSA.tif \
+    --outfile=/mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/croplands/ESACCI-LC-L4-LC10-Map-250m-P1Y-2016-v1.0_SSA_croplands.tif \
+    --calc="A==4"
+
 
 ########################################
 #Globcover2009_V2.3_Global_
