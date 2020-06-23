@@ -1,0 +1,349 @@
+---
+title: "Summary statistics of acid soil distribution in cropland in SSA"
+author: "Sebastian Palmas"
+date:  "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+---
+
+
+This code below estimates the amount of cropland under high acidity. I include general cropland area (based on several cropland areas) and areas under Barley, Maize and Rice and other crops (based on SPAM). It also incoroporates population information under acid soils based in WorldPop rasters. The code returns several summary statistics by country, some graphs and tables that can be used in maps.
+
+This script also prepares the tables used in the acidsoils-explorer Shiny app.
+
+* We use africasoils pH prediction for the continent.
+* General cropland area: ESACCI. ESACCI is at 20m, I will decrease the resolution to 1km to facilitate analysis.
+* We are using SPAM 2010 v1.1 for the specific crop areas and production
+* We use Worldpop for the population estimates
+
+
+## pH
+The pH layer was obtained from ISRIC 250m resolution prediction. 
+
+## ESACCI cropland
+## SPAM
+These are the physical areas and production several crops at 10 x 10 km grid-cell resolution. This will be the resolution of the analysis and pH and population layers will be warped to match these.
+
+Physical area (A_CROP files): Physical area is measured in a **hectare** and represents the actual area where a crop is grown, not counting how often production was harvested from it. Physical area is calculated for each production system and crop, and the sum of all physical areas of the four production systems constitute the total physical area for that crop. The sum of the physical areas of all crops in a pixel may not be larger than the pixel size.
+
+Production (P_CROP files): Production, for each production system and crop, is calculated by multiplying area harvested with yield. It is measured in **metric tons**. The total production of a crop includes the production of all production systems of that crop.
+
+## WorldPop
+The Worldpop has a 1 km resolution and we need to bring it down to 10 km to match the SPAM layer. We need to be careful because the Worldpop layer has population per pixel and the aggregate function needs to be a sum, not a mean of the pixel.
+
+We also need to warp it to match it to the pH layer to be able to make calculations. IF the file already exists, then just read it from the file.
+
+The code above crashes frequently, I will just read the file that it creates instead of creating one everytime the script runs. I need to remember to rerun the code if the original layer changes.
+
+
+
+## Steps
+The process for this analysis is: 
+
+1. Reading pH and decrease resolution to 1km
+2. Warp ESACCI layer to match pH
+3. Warp WorldPop to match pH
+4. Summarizing data by country
+5. Exporting table to use in the acidsoils explorer
+
+
+## Packages
+```{r, message=FALSE}
+library(terra)
+library(tidyverse)
+```
+
+# Reading data
+## SSA admin
+
+```{r}
+SSA <- vect("F:/Work/Africa/admin/SSA/SSA_admin_simplified.shp")
+
+#Creating table to store results
+SSA_names <- as.data.frame(SSA)
+
+#Adding the region
+regions <- read_csv("../../data/country_codes_regions.csv")
+SSA_names <- inner_join(SSA_names, regions, by=c("country_co", "country_na"))
+
+#adding SSA to use when changing FID2 to ISO3166_1 at the end
+SSA_names <- rbind(SSA_names, NA) 
+SSA_names$ISO3166_1[45] <- "SSA"
+SSA_names$FID2[45] <- sum(SSA_names$FID2, na.rm=TRUE)
+```
+
+## SSA tif, pH, croplands, specific crop distributions and population
+These rasters are preprocessed in `acidsoils_summary_setup.sh`. These rasters have been resampled to the same 1km resolution and extent.
+
+
+
+C3S Values:
+10,11,12: Cropland, rainfed
+20: Cropland, irrigated or post-flooding
+30: Mosaic cropland (>50%)
+40: Mosaic cropland (<50%)
+
+Globcover:
+11: Post-flooding or irrigated croplands (or aquatic)
+14: Rainfed croplands
+20: Mosaic cropland (50-70%)
+30: Mosaic cropland (20-50%) 
+
+
+```{r}
+#SSA tif
+SSA_tif  <- rast("../../data/admin/SSA_admin_simplified_1000m.tif")
+
+#pH
+af_PHIHOX <- rast("../../data/afsis/af_PHIHOX_T__M_sd1_1000m_SSA.tif")
+
+#cropland
+c3s <- rast("../../data/croplands/C3S-LC-L4-LCCS-Map-1000m-P1Y-2018-v2.1.1_SSA.tif")
+globcover <- rast("../../data/croplands/GLOBCOVER_L4_200901_200912_V2.3_1000m_SSA.tif")
+
+#SPAM distribution
+A_BARL <- rast("../../data/SPAM/spam2010V1r1_global_A_BARL_A_1000m_SSA.tif")
+A_MAIZ <- rast("../../data/SPAM/spam2010V1r1_global_A_MAIZ_A_1000m_SSA.tif")
+A_RICE <- rast("../../data/SPAM/spam2010V1r1_global_A_RICE_A_1000m_SSA.tif")
+
+P_BARL <- rast("../../data/SPAM/spam2010V1r1_global_P_BARL_A_1000m_SSA.tif")
+P_MAIZ <- rast("../../data/SPAM/spam2010V1r1_global_P_MAIZ_A_1000m_SSA.tif")
+P_RICE <- rast("../../data/SPAM/spam2010V1r1_global_P_RICE_A_1000m_SSA.tif")
+
+#WorldPop
+AFR_PPP_2020_adj_v2 <- rast("../../data/WorldPop/AFR_PPP_2020_adj_v2_1000m_SSA.tif")
+```
+
+## Create table of pixel values
+```{r}
+SSA_pixel_table <- data.frame(values(SSA_tif))
+colnames(SSA_pixel_table) <- "FID2"
+
+SSA_pixel_table$af_PHIHOX <- as.vector(values(af_PHIHOX))
+
+SSA_pixel_table$c3s <- as.vector(values(c3s))
+SSA_pixel_table$globcover <- as.vector(values(globcover))
+
+SSA_pixel_table$A_BARL <- as.vector(values(A_BARL))
+SSA_pixel_table$A_MAIZ <- as.vector(values(A_MAIZ))
+SSA_pixel_table$A_RICE <- as.vector(values(A_RICE))
+SSA_pixel_table$P_BARL <- as.vector(values(P_BARL))
+SSA_pixel_table$P_MAIZ <- as.vector(values(P_MAIZ))
+SSA_pixel_table$P_RICE <- as.vector(values(P_RICE))
+
+SSA_pixel_table$AFR_PPP_2020_adj_v2 <- as.vector(values(AFR_PPP_2020_adj_v2))
+
+
+
+SSA_pixel_table <- SSA_pixel_table %>% 
+  filter(FID2 != -999) %>% 
+  filter(!is.na(af_PHIHOX)) %>% 
+  mutate(cropprop = ifelse(c3s == 30, 0.75, ifelse(c3s == 40, 0.25, ifelse(c3s %in% c(10,11), 1, 0))),
+         cropprop2 = ifelse(globcover == 20, 0.60, ifelse(globcover == 30, 0.35, ifelse(globcover %in% c(11, 14), 1, 0))),
+         ruralpop = AFR_PPP_2020_adj_v2 * cropprop,
+         ruralpop2 = AFR_PPP_2020_adj_v2 * cropprop2)
+```
+
+
+#Analysis
+
+## Summarizing total crop areas and rural 
+
+
+## Summarizing areas of crop by country: Total and acidic
+
+In here we summarize the pixel values by each country and add the results to the final table.
+```{r}
+SSA_summary_table <- SSA_pixel_table %>%
+  group_by(FID2) %>%
+  summarise(Crop_AREA = sum(cropprop, na.rm=TRUE),
+            Crop_AREA_ACID = sum(cropprop[af_PHIHOX < 56], na.rm=TRUE),
+            Crop_AREA2 = sum(cropprop2, na.rm=TRUE),
+            Crop_AREA2_ACID = sum(cropprop2[af_PHIHOX < 56], na.rm=TRUE),
+            RuralPop = sum(ruralpop, na.rm=TRUE),
+            RuralPop_ACID = sum(ruralpop[af_PHIHOX < 56], na.rm=TRUE),
+            RuralPop2 = sum(ruralpop2, na.rm=TRUE),
+            RuralPop2_ACID = sum(ruralpop2[af_PHIHOX < 56], na.rm=TRUE),
+            BARL_AREA = sum(A_BARL),
+            BARL_AREA_ACID = sum(A_BARL[af_PHIHOX < 56]),
+            MAIZ_AREA = sum(A_MAIZ),
+            MAIZ_AREA_ACID = sum(A_MAIZ[af_PHIHOX < 56]),
+            RICE_AREA = sum(A_RICE),
+            RICE_AREA_ACID = sum(A_RICE[af_PHIHOX < 56]),
+            BARL_PROD = sum(P_BARL),
+            BARL_PROD_ACID = sum(P_BARL[af_PHIHOX < 56]),
+            MAIZ_PROD = sum(P_MAIZ),
+            MAIZ_PROD_ACID = sum(P_MAIZ[af_PHIHOX < 56]),
+            RICE_PROD = sum(P_RICE),
+            RICE_PROD_ACID = sum(P_RICE[af_PHIHOX < 56]))
+
+## Exporting Results
+SSA_summary_table <- SSA_names %>% left_join(SSA_summary_table, by="FID2")
+
+write.csv(SSA_summary_table, file="../../output/tables/acid_crops_summary_bycountry.csv", row.names=FALSE)
+```
+
+## Summarizing and exporting results for the acidsoils-explorer
+In here we summarize the pixel values by each country and add the results to the final table.
+
+```{r}
+pH_classes <- c(56, 65, 73, 78)  #original units in ph X 10
+
+#COUNTRY, CROP, TYPE, pH_TYPE, Value
+col_names <- c("FID2", "ph_class", "area_km", "prop")
+results <- matrix(ncol = length(col_names)) %>% data.frame()
+colnames(results) <- col_names
+
+#getting the raster for all
+crop_area_results <- SSA_pixel_table %>% 
+  group_by(FID2) %>% 
+  summarise(ph_class1 = sum(cropprop[af_PHIHOX < pH_classes[1]], na.rm=TRUE),
+            ph_class2 = sum(cropprop[af_PHIHOX >= pH_classes[1] & af_PHIHOX < pH_classes[2]], na.rm=TRUE),
+            ph_class3 = sum(cropprop[af_PHIHOX >= pH_classes[2] & af_PHIHOX < pH_classes[3]], na.rm=TRUE),
+            ph_class4 = sum(cropprop[af_PHIHOX >= pH_classes[3] & af_PHIHOX < pH_classes[4]], na.rm=TRUE),
+            ph_class5 = sum(cropprop[af_PHIHOX >= pH_classes[4]], na.rm=TRUE))
+
+#calculating totalSSA
+crop_area_results <- rbind(crop_area_results, colSums(crop_area_results))
+
+#calculating prop
+crop_area_result_prop <- crop_area_results[,2:6]/rowSums(crop_area_results[,2:6])
+crop_area_result_prop <- tibble(FID2 = crop_area_results$FID2, crop_area_result_prop)
+
+#converting both tables to long format and bind them
+crop_area_results <- crop_area_results %>% pivot_longer(cols = ph_class1:ph_class5,
+                                                        names_to="ph_class",
+                                                        values_to="area_km")
+crop_area_result_prop <-
+  crop_area_result_prop %>% pivot_longer(cols = ph_class1:ph_class5,
+                                         names_to="ph_class",
+                                         values_to="prop")
+
+crop_area_results <- full_join(crop_area_results, crop_area_result_prop, by=c("FID2", "ph_class"))
+
+
+
+#adding lines
+results <- rbind(results, crop_area_results)
+
+
+#change FID2 to ISO3166_1
+results$ISO3166_1 <- SSA_names$ISO3166_1[match(results$FID2, SSA_names$FID2)]
+results <- results %>% select(ISO3166_1, ph_class, area_km, prop)
+
+
+write.csv(results, file="C:/Users/S.PALMAS/source/repos/spalmas/acidsoils-explorer/data/cropareas.csv", row.names=FALSE)
+```
+
+```{r}
+types <- c("Area", "Prop") #c("Area", Prod")
+pH_classes <- c(56, 65, 73, 78)  #original units in ph X 10
+crops <- c("BARL", "MAIZ", "RICE")
+
+#COUNTRY, CROP, TYPE, pH_TYPE, Value
+col_names <- c("FID2", "ph_class", "area_km", "prop", "crop", "type", "unit")
+results <- matrix(ncol = length(col_names)) %>% data.frame()
+colnames(results) <- col_names
+
+for (crop in crops){
+  #crop <- crops[1]  #to test
+  for (type in types){ 
+    #type <- types[1]
+    if (type == "Area"){
+      type_code <- "A_"
+      type_unit <- "km2"
+    } else if (type == "Prod"){
+      type_code <- "P_"
+      type_unit <- "MT"
+    }
+    
+    
+    SSA_pixel_table$type_crop <- SSA_pixel_table[,paste0(type_code, crop)]
+    
+    #getting the raster for all
+    crop_type_results <- SSA_pixel_table %>% 
+      group_by(FID2) %>% 
+      summarise(ph_class1 = sum(type_crop[af_PHIHOX < pH_classes[1]], na.rm=TRUE),
+                ph_class2 = sum(type_crop[af_PHIHOX >= pH_classes[1] & af_PHIHOX < pH_classes[2]], na.rm=TRUE),
+                ph_class3 = sum(type_crop[af_PHIHOX >= pH_classes[2] & af_PHIHOX < pH_classes[3]], na.rm=TRUE),
+                ph_class4 = sum(type_crop[af_PHIHOX >= pH_classes[3] & af_PHIHOX < pH_classes[4]], na.rm=TRUE),
+                ph_class5 = sum(type_crop[af_PHIHOX >= pH_classes[4]], na.rm=TRUE))
+    
+    #calculating totalSSA
+    crop_type_results <- rbind(crop_type_results, colSums(crop_type_results))
+    
+    #calculating prop
+    crop_type_result_prop <- crop_type_results[,2:6]/rowSums(crop_type_results[,2:6])
+    crop_type_result_prop <- tibble(FID2 = crop_type_results$FID2, crop_type_result_prop)
+
+    #converting both tables to long format and bind them
+    crop_type_results <- crop_type_results %>% pivot_longer(cols = ph_class1:ph_class5,
+                                                          names_to="ph_class",
+                                                          values_to="area_km")
+    crop_type_result_prop <-
+      crop_type_result_prop %>% pivot_longer(cols = ph_class1:ph_class5,
+                                                                    names_to="ph_class",
+                                                                    values_to="prop")
+    
+    crop_type_results <- full_join(crop_type_results, crop_type_result_prop, by=c("FID2", "ph_class"))
+    
+    
+    #fill results table
+    crop_type_results$crop <- crop
+    crop_type_results$type <- type
+    crop_type_results$unit <- type_unit
+    
+    #adding lines
+    results <- rbind(results, crop_type_results)
+  }
+}
+
+
+#change FID2 to ISO3166_1
+results$ISO3166_1 <- SSA_names$ISO3166_1[match(results$FID2, SSA_names$FID2)]
+results <- results %>% select(ISO3166_1, ph_class, area_km, prop, crop, type, unit)
+
+
+write.csv(results, file="C:/Users/S.PALMAS/source/repos/spalmas/acidsoils-explorer/data/by_crop_areas.csv", row.names=FALSE)
+```
+
+Population table
+
+```{r}
+pH_classes <- c(56, 65, 73, 78)  #original units in ph X 10
+
+#COUNTRY, CROP, TYPE, pH_TYPE, Value
+col_names <- c("FID2", "ph_class", "population", "prop")
+pop_results <- matrix(ncol = length(col_names)) %>% data.frame()
+colnames(pop_results) <- col_names
+
+#getting the raster for all
+pop_results <- SSA_pixel_table %>% group_by(FID2) %>% 
+  summarise(ph_class1 = sum(ruralpop[af_PHIHOX < pH_classes[1]], na.rm=TRUE),
+            ph_class2 = sum(ruralpop[af_PHIHOX >= pH_classes[1] & af_PHIHOX < pH_classes[2]], na.rm=TRUE),
+            ph_class3 = sum(ruralpop[af_PHIHOX >= pH_classes[2] & af_PHIHOX < pH_classes[3]], na.rm=TRUE),
+            ph_class4 = sum(ruralpop[af_PHIHOX >= pH_classes[3] & af_PHIHOX < pH_classes[4]], na.rm=TRUE),
+            ph_class5 = sum(ruralpop[af_PHIHOX >= pH_classes[4]], na.rm=TRUE))
+
+
+#calculating prop
+pop_results_prop <- pop_results[,2:6]/rowSums(pop_results[,2:6])
+pop_results_prop <- tibble(FID2 = pop_results$FID2, pop_results_prop)
+
+#converting both tables to long format and bind them
+pop_results <- pop_results %>% pivot_longer(cols = ph_class1:ph_class5,
+                                                      names_to="ph_class",
+                                                      values_to="population")
+pop_results_prop <-
+  pop_results_prop %>% pivot_longer(cols = ph_class1:ph_class5,
+                                         names_to="ph_class",
+                                         values_to="prop")
+
+pop_results <- full_join(pop_results, pop_results_prop, by=c("FID2", "ph_class"))
+
+#change FID2 to ISO3166_1
+pop_results$ISO3166_1 <- SSA_names$ISO3166_1[match(pop_results$FID2, SSA_names$FID2)]
+pop_results <- pop_results %>% select(ISO3166_1, ph_class, population, prop)
+
+
+write.csv(pop_results, file="C:/Users/S.PALMAS/source/repos/spalmas/acidsoils-explorer/data/population.csv", row.names=FALSE)
+```

@@ -230,17 +230,19 @@ gdalwarp -t_srs '+proj=laea +lat_0=5 +lon_0=20 +x_0=0 +y_0=0 +ellps=WGS84 +units
 ################################################################################
 ############### ISRIC pH 
 ################################################################################
-gdalwarp -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
-    -of Gtiff -co compress=lsw -overwrite -ot Byte -t_srs EPSG:4326 \
+gdalwarp  -t_srs '+proj=laea +lat_0=5 +lon_0=20 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs'  -tr 1000 1000 \
+    -r bilinear -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
+    -of Gtiff -co compress=lsw -overwrite \
     /mnt/f/work/files.isric.org/public/afsis250m/af_PHIHOX_T__M_sd1_250m.tif \
-    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/afsis250m/af_PHIHOX_T__M_sd1_250m_SSA.tif
+    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/afsis/af_PHIHOX_T__M_sd1_1000m_SSA.tif
 
+gdalinfo  /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/afsis/af_PHIHOX_T__M_sd1_1000m_SSA.tif
+    
 #Getting acidsoils layer
-gdal_calc.py -A /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/afsis250m/af_PHIHOX_T__M_sd1_250m_SSA.tif \
-    --outfile=/mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/afsis250m/af_PHIHOX_T__M_sd1_250m_SSA_under56.tif \
+gdal_calc.py -A /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/afsis/af_PHIHOX_T__M_sd1_1000m_SSA.tif \
+    --outfile=/mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/afsis/af_PHIHOX_T__M_sd1_500m_SSA_under56.tif \
     --calc="A<56"
 
-gdalinfo /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/afsis250m/af_PHIHOX_T__M_sd1_250m_SSA_under56.tif
 
 
 #Ph layer only for Ethiopia
@@ -254,7 +256,7 @@ gdalinfo /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/afsis250m/af_
 
 
 ################################################################################
-############### CREATING CROPLAND RATERS CROPPED TO SSA
+############### CREATING CROPLAND RASTERS CROPPED TO SSA
 ################################################################################
 
 ########################################
@@ -263,18 +265,23 @@ gdalinfo /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/afsis250m/af_
 #Copernicus Global Land Service: Land Cover 100m: epoch 2018: Africa demo 2019.
 #DOI 10.5281/zenodo.3518087
 ########################################
-gdalwarp -s_srs EPSG:4326 -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
-    -of Gtiff -co compress=lsw -overwrite -ot Byte -t_srs EPSG:4326 \
+gdalwarp -s_srs EPSG:4326 -t_srs '+proj=laea +lat_0=5 +lon_0=20 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs'  -tr 1000 1000 \
+    -r bilinear -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
+    -of Gtiff -co compress=lsw -overwrite \
     /mnt/f/work/Copernicus/ProbaV_LC100_epoch2018_nrt_Africa_v2.1.1/ProbaV_LC100_epoch2018-nrt_Africa_v2.1.1_crops-coverfraction-layer_EPSG-4326.tif \
-    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/croplands/ProbaV_LC100_epoch2018-nrt_Africa_v2.1.1_crops-coverfraction-layer_EPSG-4326_SSA.tif
+    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/croplands/ProbaV_LC100_epoch2018-nrt_Africa_v2.1.1_crops-coverfraction-layer_1000m_SSA.tif
+
 
 ########################################
 #C3S-LC-L4-LCCS
 ########################################
-gdalwarp -s_srs EPSG:4326 -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
-    -of Gtiff -co compress=lsw -overwrite -ot Byte -t_srs EPSG:4326 \
+gdalwarp -s_srs EPSG:4326 -t_srs '+proj=laea +lat_0=5 +lon_0=20 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs'  -tr 1000 1000 \
+    -r mode -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
+    -of Gtiff -co compress=lsw -overwrite -ot Byte \
     NETCDF:/mnt/f/Work/C3S-LC-L4-LCCS/C3S-LC-L4-LCCS-Map-300m-P1Y-2018-v2.1.1.nc:lccs_class \
-    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/croplands/C3S-LC-L4-LCCS-Map-300m-P1Y-2018-v2.1.1_SSA.tif
+    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/croplands/C3S-LC-L4-LCCS-Map-1000m-P1Y-2018-v2.1.1_SSA.tif
+    
+gdalinfo     /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/croplands/C3S-LC-L4-LCCS-Map-1000m-P1Y-2018-v2.1.1_SSA.tif
 
 
 ########################################
@@ -297,10 +304,13 @@ gdal_calc.py -A /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/cropla
 ########################################
 #Globcover2009_V2.3_Global_
 ########################################
-gdalwarp -cutline /mnt/f/Work/GADM/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
-    -of GTiff -co compress=lzw -overwrite \
+gdalwarp -t_srs '+proj=laea +lat_0=5 +lon_0=20 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs'  -tr 1000 1000 \
+    -r mode -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
+    -of Gtiff -co compress=lsw -overwrite -ot Byte \
     /mnt/f/Work/Globcover/Globcover2009_V2.3_Global_/GLOBCOVER_L4_200901_200912_V2.3.tif \
-    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/croplands/GLOBCOVER_L4_200901_200912_V2.3_SSA.tif
+    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/croplands/GLOBCOVER_L4_200901_200912_V2.3_1000m_SSA.tif
+
+
 
 #Ethiopia LC
 gdalwarp -cutline /mnt/f/Work/GADM/gadm36_levels_shp/gadm36_ETH_shp/gadm36_ETH_0.shp -crop_to_cutline \
@@ -314,21 +324,99 @@ gdalinfo /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/croplands/GLO
 ########################################
 #SPAM
 ########################################
-#AREA
-gdalwarp -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
-    -of GTiff -co compress=lzw -overwrite \
+#AREA  hectares
+gdalwarp -t_srs '+proj=laea +lat_0=5 +lon_0=20 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs'  -tr 1000 1000 \
+    -r bilinear -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
+    -of Gtiff -co compress=lsw -overwrite -ot Byte \
     /mnt/f/Work/SPAM/spam2010v1r1/spam2010v1r1_global_phys_area.geotiff/spam2010V1r1_global_A_BARL_A.tif \
     /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_A_BARL_A_SSA.tif
+    
+#original layer in 10x10km. We need to reduce pixel values by 100
+gdal_calc.py -A /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_A_BARL_A_SSA.tif \
+    --outfile=/mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_A_BARL_A_1000m_SSA.tif \
+    --calc="A/100"
+    
 
-gdalwarp -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
-    -of GTiff -co compress=lzw -overwrite \
+
+gdalwarp -t_srs '+proj=laea +lat_0=5 +lon_0=20 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs'  -tr 1000 1000 \
+    -r bilinear -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
+    -of Gtiff -co compress=lsw -overwrite -ot Byte \
     /mnt/f/Work/SPAM/spam2010v1r1/spam2010v1r1_global_phys_area.geotiff/spam2010V1r1_global_A_MAIZ_A.tif \
     /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_A_MAIZ_A_SSA.tif
+    
+#original layer in 10x10km. We need to reduce pixel values by 100
+gdal_calc.py -A /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_A_MAIZ_A_SSA.tif \
+    --outfile=/mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_A_MAIZ_A_1000m_SSA.tif \
+    --calc="A/100"
 
-gdalwarp -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
-    -of GTiff -co compress=lzw -overwrite \
+
+
+gdalwarp -t_srs '+proj=laea +lat_0=5 +lon_0=20 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs'  -tr 1000 1000 \
+    -r bilinear -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
+    -of Gtiff -co compress=lsw -overwrite -ot Byte \
     /mnt/f/Work/SPAM/spam2010v1r1/spam2010v1r1_global_phys_area.geotiff/spam2010V1r1_global_A_RICE_A.tif \
     /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_A_RICE_A_SSA.tif
+    
+#original layer in 10x10km. We need to reduce pixel values by 100
+gdal_calc.py -A /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_A_RICE_A_SSA.tif \
+    --outfile=/mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_A_RICE_A_1000m_SSA.tif \
+    --calc="A/100"
+
+
+ 
+#PRODUCTION    metric tons.
+gdalwarp -t_srs '+proj=laea +lat_0=5 +lon_0=20 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs'  -tr 1000 1000 \
+    -r bilinear -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
+    -of Gtiff -co compress=lsw -overwrite -ot Byte \
+    /mnt/f/Work/SPAM/spam2010v1r1/spam2010v1r1_global_prod.geotiff/spam2010V1r1_global_P_BARL_A.tif \
+    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_P_BARL_A_SSA.tif
+    
+#original layer in 10x10km. We need to reduce pixel values by 100
+gdal_calc.py -A /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_P_BARL_A_SSA.tif \
+    --outfile=/mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_P_BARL_A_1000m_SSA.tif \
+    --calc="A/100"
+    
+
+
+gdalwarp -t_srs '+proj=laea +lat_0=5 +lon_0=20 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs'  -tr 1000 1000 \
+    -r bilinear -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
+    -of Gtiff -co compress=lsw -overwrite -ot Byte \
+    /mnt/f/Work/SPAM/spam2010v1r1/spam2010v1r1_global_prod.geotiff/spam2010V1r1_global_P_MAIZ_A.tif \
+    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_P_MAIZ_A_SSA.tif
+    
+#original layer in 10x10km. We need to reduce pixel values by 100
+gdal_calc.py -A /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_P_MAIZ_A_SSA.tif \
+    --outfile=/mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_P_MAIZ_A_1000m_SSA.tif \
+    --calc="A/100"
+
+
+
+gdalwarp -t_srs '+proj=laea +lat_0=5 +lon_0=20 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs'  -tr 1000 1000 \
+    -r bilinear -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
+    -of Gtiff -co compress=lsw -overwrite -ot Byte \
+    /mnt/f/Work/SPAM/spam2010v1r1/spam2010v1r1_global_prod.geotiff/spam2010V1r1_global_P_RICE_A.tif \
+    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_P_RICE_A_SSA.tif
+    
+#original layer in 10x10km. We need to reduce pixel values by 100
+gdal_calc.py -A /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_P_RICE_A_SSA.tif \
+    --outfile=/mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_P_RICE_A_1000m_SSA.tif \
+    --calc="A/100"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # Ethiopia
 gdalwarp -cutline /mnt/f/Work/GADM/gadm36_levels_shp/gadm36_ETH_shp/gadm36_ETH_0.shp -crop_to_cutline \
@@ -342,21 +430,28 @@ gdalwarp -t_srs '+proj=laea +lat_0=5 +lon_0=20 +x_0=0 +y_0=0 +ellps=WGS84 +units
 
 
 
-#PRODUCTION
-gdalwarp -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
-    -of GTiff -co compress=lzw -overwrite \
-    /mnt/f/Work/SPAM/spam2010v1r1/spam2010v1r1_global_prod.geotiff/spam2010V1r1_global_P_BARL_A.tif \
-    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_P_BARL_A_SSA.tif
+########################################
+#WORLDPOP
+########################################
+gdalwarp -t_srs '+proj=laea +lat_0=5 +lon_0=20 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs'  -tr 1000 1000 \
+    -r bilinear -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
+    -of Gtiff -co compress=lsw -overwrite -ot Byte \
+    /mnt/f/Work/WorldPop/Africa/AFR_PPP_2020_adj_v2.tif \
+    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/WorldPop/AFR_PPP_2020_adj_v2_1000m_SSA.tif
+    
+    
+gdalinfo /mnt/f/Work/WorldPop/Africa/AFR_PPP_2020_adj_v2.tif    
+gdalinfo    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/WorldPop/AFR_PPP_2020_adj_v2_500m_SSA.tif
 
-gdalwarp -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
-    -of GTiff -co compress=lzw -overwrite \
-    /mnt/f/Work/SPAM/spam2010v1r1/spam2010v1r1_global_prod.geotiff/spam2010V1r1_global_P_MAIZ_A.tif \
-    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_P_MAIZ_A_SSA.tif
 
-gdalwarp -cutline /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp -crop_to_cutline \
-    -of GTiff -co compress=lzw -overwrite \
-    /mnt/f/Work/SPAM/spam2010v1r1/spam2010v1r1_global_prod.geotiff/spam2010V1r1_global_P_RICE_A.tif \
-    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/SPAM/spam2010V1r1_global_P_RICE_A_SSA.tif
+
+########################################
+#RASTERIZE SSA SHAPEFILE
+########################################
+gdal_rasterize -at -a FID2 -l SSA_admin_simplified   -of Gtiff -init -999\
+   -co compress=lzw  -ts 7375 8189 \
+    /mnt/f/Work/Africa/admin/SSA/SSA_admin_simplified.shp \
+    /mnt/c/Users/S.PALMAS/source/repos/spalmas/acidsoils/data/admin/SSA_admin_simplified_1000m.tif
 
 ########################################
 #RASTERIZE ROADS

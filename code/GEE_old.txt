@@ -1,0 +1,115 @@
+
+//Crop with pH class for app
+var crop_ph = ph.multiply(crop).selfMask().rename('crop_ph');  //.visualize({min:0, max:1, palette: ['dedede', '00A7CE']}
+
+//Function to assign a class of acidity to each pixel
+var setPalletes = function(image){
+  var image56 = image.gte(56);
+  var image66 = image.gte(66);
+  var image74 = image.gte(74);
+  var image79 = image.gte(79);
+  return image56.add(image66).add(image74).add(image79);
+};
+
+//Applying this function to image
+var crop_ph_class = setPalletes(crop_ph);
+//var crop_ph_class = setPalletes(crop_ph).visualize({min:0, max:4, palette: ['FF6B00', 'EEE49A', '5F0F40']});
+var ph_class0 = crop_ph_class.eq(0).multiply(ee.Image.pixelArea()).rename("ph_class0");
+var ph_class1 = crop_ph_class.eq(1).multiply(ee.Image.pixelArea()).rename("ph_class1");
+var ph_class2 = crop_ph_class.eq(2).multiply(ee.Image.pixelArea()).rename("ph_class2");
+var ph_class3 = crop_ph_class.eq(3).multiply(ee.Image.pixelArea()).rename("ph_class3");
+var ph_class4 = crop_ph_class.eq(4).multiply(ee.Image.pixelArea()).rename("ph_class4");
+var ph_class_bands = ph_class0.addBands(ph_class1).addBands(ph_class2).addBands(ph_class3).addBands(ph_class4);
+
+//Creating a simple pH class image
+//var crop_ph_class = crop.add(acidmask).multiply(crop).rename('crop_ph_class');  //To get one layer of 0:nothing 1: normal crop, 2:acid crop
+
+/*
+ * Population. World Pop. From website  #1km resolution 
+ * DOI: 10.5258/SOTON/WP00004
+ */
+var pop = ee.Image("users/palmasforest/AFR_PPP_2020_adj_v2").clip(SSA).rename('SSApop');
+//var pop = ee.Image("CIESIN/GPWv4/unwpp-adjusted-population-count/2020").clip(SSA);
+
+var pop_class0 = pop.multiply(crop_ph_class.eq(0)).rename("pop_class0");
+var pop_class1 = pop.multiply(crop_ph_class.eq(1)).rename("pop_class1");
+var pop_class2 = pop.multiply(crop_ph_class.eq(2)).rename("pop_class2");
+var pop_class3 = pop.multiply(crop_ph_class.eq(3)).rename("pop_class3");
+var pop_class4 = pop.multiply(crop_ph_class.eq(4)).rename("pop_class4");
+var pop_class_bands = pop.addBands(pop_class0).addBands(pop_class1).addBands(pop_class2).addBands(pop_class3).addBands(pop_class4);
+
+/*
+ *  Background layers layer
+ */
+var background = ee.Image(0).visualize({palette: ['black']});
+var SSAwater = ee.Image("MODIS/006/MOD44W/2015_01_01")
+  .select('water_mask')
+  .clip(SSA)
+  .visualize({min:0, max:1, palette: ['dedede', '00A7CE']});
+
+/*
+ *  Accesibility layer
+ */
+//var access = ee.Image("Oxford/MAP/accessibility_to_cities_2015_v1_0")
+//  .select('accessibility').clip(SSA);
+
+/*
+ *  MULTIBAND IMAGE FOR APP
+ */
+
+//Map2 to export. 
+var acidsoils_tiles_v2_6 = crop_ph_class.visualize({min:0, max:4, palette: ['FF6B00', '#f7a84d', 'EEE49A', '#a77a6d', '5F0F40']});
+Export.map.toCloudStorage({
+  image: acidsoils_tiles_v2_6,
+  description:'acidsoils_tiles_v2_6',
+  bucket:'acidsoils-ssa',
+  //region: SSA,  //careful with the region. Otherwise it will export to the current viewport extension
+  minZoom:4,
+  maxZoom:10,
+  writePublicTiles: true,
+  skipEmptyTiles: true
+});
+
+////// ANALYSIS //////
+// Get LULC for each country.
+var SSA_LULC_Histogram = LULC.reduceRegions({
+  collection:SSA,
+  reducer:ee.Reducer.frequencyHistogram()
+});
+Export.table.toDrive({
+  collection:SSA_LULC_Histogram,
+  description:"SSA_LULC_Histogram",
+  folder:'acidsoils',
+  fileFormat:'GeoJSON'
+});
+
+
+// Get area by crop_ph_class. It is also used to estimate total cropland area
+var ph_class_bands_table = ph_class_bands.reduceRegions({
+  collection: SSA,
+  reducer: ee.Reducer.sum(),
+  //scale: crop_scale  // Resolution of CGLS
+});
+Export.table.toDrive({
+  collection: ph_class_bands_table,
+  description:'ph_class_bands_table',
+  folder: 'acidsoils',
+  fileFormat: 'GeoJSON'
+});
+
+// Total population by country
+var pop_class_bands_table = pop_class_bands.reduceRegions({
+  collection: SSA,
+  reducer: ee.Reducer.sum(),
+  //scale: pop_scale // Resolution of Worldpop
+});
+Export.table.toDrive({
+  collection: pop_class_bands_table,
+  description:'pop_class_bands_table',
+  folder: 'acidsoils',
+  fileFormat: 'GeoJSON'
+});
+
+////// PRINTING THINGS //////
+//print (pop_class_bands_table);
+//print (SSA_LULC_Histogram);
