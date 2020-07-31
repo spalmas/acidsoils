@@ -189,6 +189,7 @@ LSMS_maize = cbind(LSMS_maize,
                                   buffer=5000, # Meters
                                   small=TRUE, 
                                   fun = mean))
+LSMS$ID <- NULL
 ```
 
 ## 6) Adding rainfall raster to rasterlist
@@ -228,7 +229,7 @@ LSMS_maize$rainfall_season <- values
 We'll assume that all sales were made in January.
 ```{r}
 LSMS_maize$Month_code <- 1  #January
-LSMS_maize$maize_Unmilled_norm_t0 <- 0 #Previous month untrended normlized price
+LSMS_maize$maize_Unmilled_norm_t0 <- 0 #Previous month untrended stamdardized price
 ```
 
 

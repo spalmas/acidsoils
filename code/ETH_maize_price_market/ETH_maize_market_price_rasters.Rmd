@@ -21,7 +21,7 @@ Because the model uses month as one of the predictors and there isn't any raster
 
 
 
-This script is the next step from `ETH_maize_market_price_model.Rmd`.
+This script uses the results from `ETH_maize_market_price_model.Rmd`.
 
 
 # I. Packages and models
@@ -127,13 +127,8 @@ for (m in Month_codes){
   maize_Unmilled_norm.pls <- predict(model.pls, newdata=stack_table)
   maize_Unmilled_norm.rf <- predict(model.rf, newdata=stack_table)
   
-  #Putting together ensemble results to a table
-  data.ens <- data.frame(maize_Unmilled_norm.gbm,
-                         maize_Unmilled_norm.pls,
-                         maize_Unmilled_norm.rf)
-  
   #running ensemble model
-  maize_Unmilled_norm.ens <- predict(model.ens, data.ens)
+  maize_Unmilled_norm.ens <- model.ens(maize_Unmilled_norm.gbm, maize_Unmilled_norm.pls, maize_Unmilled_norm.rf)
   
   #Running ML models
   for(model in c("gbm", "pls", "rf", "ens")){
@@ -150,6 +145,7 @@ The prediction is de-trended and normalized. We need a standard deviation and me
 ```{r}
 maize_mean <- 10 
 maize_sd <- 1.7
+min_rasters <- max_rasters <- 10
 
 #Months to predict
 Month_codes <- c(1:12)  #Running ML models
@@ -161,6 +157,10 @@ for (m in Month_codes){
       #converting back    
       back <- norm*maize_sd + maize_mean
       
+      #min and max 
+      if(min(values(back), na.rm=TRUE) < min_rasters){min_rasters <- min(values(back), na.rm=TRUE)}
+      if(max(values(back), na.rm=TRUE) > max_rasters){max_rasters <- max(values(back), na.rm=TRUE)}
+      
       writeRaster(back, filename=paste0("../../output/crop_market_price/months/", m, "/ETH_maize_market_price_", model, "_", m,".tif"),
                   overwrite=TRUE, wopt = list(gdal=c("COMPRESS=LZW"), names = paste0("maize_Unmilled_", model)))
     }
@@ -171,17 +171,68 @@ for (m in Month_codes){
 #library(terra)
 #minmax <- rast("../../output/crop_market_price/months/12/ETH_maize_market_price_ens_12.tif")
 minmax <- back
-values(minmax)[1] <- 8.5
-values(minmax)[2] <- 13.5
+values(minmax)[1] <- min_rasters
+values(minmax)[2] <- max_rasters
 writeRaster(minmax, filename="../../output/crop_market_price/ETH_maize_market_price_minmax.tif",
             overwrite=TRUE, wopt = list(gdal=c("COMPRESS=LZW"), names = paste0("maize_Unmilled_minmax")))
 
 
 ```
 
+# V. Calculating percentage difference rasters
+
+```{r}
+jan_price <- rast("../../output/crop_market_price/months/1/ETH_maize_market_price_ens_1.tif")
+
+min_rasters <- max_rasters <- 0
+
+for (m in Month_codes){
+  month_price <- rast(paste0("../../output/crop_market_price/months/", m, "/ETH_maize_market_price_ens_", m,".tif"))
+  
+  change_month_price <- 100 * (month_price - jan_price) / jan_price
+  
+  
+        #min and max 
+      if(min(values(change_month_price), na.rm=TRUE) < min_rasters){min_rasters <- min(values(change_month_price), na.rm=TRUE)}
+      if(max(values(change_month_price), na.rm=TRUE) > max_rasters){max_rasters <- max(values(change_month_price), na.rm=TRUE)}
+  
+  
+  writeRaster(change_month_price,
+              filename = paste0("../../output/crop_market_price/months/", m, "/ETH_maize_market_price_ens_", m,"_diff.tif"),
+              overwrite=TRUE, wopt = list(gdal=c("COMPRESS=LZW")))
+}
+
+#let's create a raster with min a max values to create the visualization parameters
+#library(terra)
+#minmax <- rast("../../output/crop_market_price/months/12/ETH_maize_market_price_ens_12.tif")
+minmax <- change_month_price
+values(minmax)[1] <- min_rasters
+values(minmax)[2] <- max_rasters
+writeRaster(minmax, filename="../../output/crop_market_price/ETH_maize_market_price_minmax_diff.tif",
+            overwrite=TRUE, wopt = list(gdal=c("COMPRESS=LZW"), names = paste0("maize_Unmilled_minmax")))
 
 
-# IV. Raster prediction using terra::predict
+```
+
+# VI. Check distribution of results
+```{r}
+minlist <- meanlist <- maxlist <- rep(NA, times=12)
+for (m in Month_codes){
+  hola <- rast(paste0("../../output/crop_market_price/months/", m, "/ETH_maize_market_price_ens_", m,".tif"))
+  
+  minlist[m] <- round(min(values(hola), na.rm=T), digits=3)
+  meanlist[m] <- round(mean(values(hola), na.rm=T), digits=3)
+  maxlist[m] <- round(max(values(hola), na.rm=T), digits=3)
+}
+
+print(minlist)
+print(meanlist)
+print(maxlist)
+```
+
+
+
+# VII. Raster prediction using terra::predict
 This code below is not working.
 ```{r, eval=FALSE}
 #Months to predict

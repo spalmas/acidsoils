@@ -29,8 +29,6 @@ We use the "sp", "raster" and "rgdal" R packages for creating and manipulating s
 rm(list=ls()) 
 library(dplyr)
 library(ggplot2)
-library(rgdal)
-library(terra)
 
 source("../plot_fitness.R")
 ```
@@ -43,7 +41,7 @@ CSA$Month_code <- factor(CSA$Month_code)
 
 
 ## Calibration and validation datasets
-CSA data spans from July/2013 to May/2019. The calibration data will be  all data until May 2018 and the validation dataset will be all that remains (i.e. the last year).
+CSA data spans from July/2013 to May/2019. The calibration data will be all data until May 2018 and the validation dataset will be all that remains (i.e. the last year).
 
 
 ```{r}
@@ -72,6 +70,28 @@ library(pls)
 library(randomForest)
 ```
 
+This will be the list of covariates in the models
+```{r}
+covariates <- c("maize_Unmilled_norm_t0",
+                "Month_code", "Longitude", "Latitude",
+                "BIO1", "BIO12", "BIO15", "BIO7",
+                "CEC",
+                "DCELL", "DOR1", "DOR2", "DOWS", "DPOP1", "DPOP2",
+                "EVI",
+                #"LCS", "LCT", "LCU", 
+                #"LSTD", "LSTN",
+                #"MB1", "MB2", "MB3", "MB7", 
+                "MDEM",
+                #"NPPA", "NPPS",
+                "PARA", "PARV",
+                "PH", 
+                #"S1VV", "S2B11", "S2B12", 
+                "SLOPE", "SND", "SOC", "TIM", "WPOP",
+                "rainfall_season")
+
+```
+
+
 ## A) Stochastic gradient Boosting
 ```{r}
 # Control setup
@@ -80,7 +100,7 @@ tc <- trainControl(method = "cv",
                    number=10)   #10-fold Cross Validation
 
 #Traning model
-model.gbm <- train(x = c.data[,2:41], y = c.data[,1], 
+model.gbm <- train(x = c.data[,covariates], y = c.data[,1], 
                    method = "gbm", 
                    preProc = c("center", "scale"),
                    trControl = tc,
@@ -93,6 +113,7 @@ print(model.gbm)
 ```
 
 ```{r, echo=FALSE}
+gbm.rsq <- rsq(obs = c.data[,1], pred = predict(model.gbm))
 v.imp.gbm <- varImp(model.gbm)
 plot(v.imp.gbm, top=28)
 ```
@@ -104,7 +125,7 @@ tc <- trainControl(method = "cv",
                    number = 10)   #10-fold Cross Validation
 
 #Traning model
-model.nn <- train(c.data[,2:41], c.data[,1], 
+model.nn <- train(c.data[,covariates], c.data[,1], 
                   method = "dnn", 
                   preProc = c("center", "scale"), 
                   trControl = tc,
@@ -130,7 +151,7 @@ tc <- trainControl(method = "cv",
                    number = 10)   #10-fold Cross Validation
 
 #Traning model
-model.pls <- train(c.data[,2:41], c.data[,1], 
+model.pls <- train(c.data[,covariates], c.data[,1], 
                    method = "pls", 
                    preProc = c("center", "scale"),
                    tuneGrid = expand.grid(ncomp = 1:10),
@@ -141,6 +162,7 @@ print(model.pls)
 ```
 
 ```{r, echo=FALSE}
+pls.rsq <- rsq(obs = c.data[,1], pred = predict(model.pls))
 v.imp.pls <- varImp(model.pls)
 plot(v.imp.pls, top=28)
 ```
@@ -155,7 +177,7 @@ set.seed(1234)
 tc <- trainControl(method = "oob")  #out of bag error for random forests
 
 #Traning model
-model.rf <- train(c.data[,2:41], c.data[,1], 
+model.rf <- train(c.data[,covariates], c.data[,1], 
                   method = "rf",
                   preProc = c("center", "scale"),
                   trControl = tc)
@@ -164,6 +186,7 @@ print(model.rf)
 ```
 
 ```{r, echo=FALSE}
+rf.rsq <- rsq(obs = c.data[,1], pred = predict(model.rf))
 v.imp.rf <- varImp(model.rf, useModel = FALSE)
 plot(v.imp.rf, top=28)
 ```
@@ -191,31 +214,42 @@ lm1 <- lm(maize_Unmilled_norm ~ Month_code + WPOP + DPOP1 + Longitude + Latitude
 summary(lm1)
 ```
 
-
-# III. ENSEMBLE FITTING
-The ensemble fitting is using the validation dataset because predictions on data that have been used for the training of the weak learners are not relevant for the training of the meta-model. 
-
-*I need to check the proportion used to divide calibration and validation datasets. Right now is 80-20%*
-
 ```{r}
-c.data.ens <- data.frame(maize_Unmilled_norm = v.data$maize_Unmilled_norm,
-                         maize_Unmilled_norm.gbm = predict(model.gbm, v.data),
-                         maize_Unmilled_norm.pls = predict(model.pls, v.data),
-                         maize_Unmilled_norm.rf = predict(model.rf, v.data))
+v.imp.gbm$importanceset
+
+v.imp.gbm$importance$variable <- rownames(v.imp.gbm$importance)
+v.imp.pls$importance$variable <- rownames(v.imp.pls$importance)
+v.imp.rf$importance$variable <- rownames(v.imp.rf$importance)
+
+varimp_table <- v.imp.gbm$importance %>% 
+  left_join(v.imp.pls$importance, by = 'variable') %>% 
+  left_join(v.imp.rf$importance, by = 'variable') %>% 
+  rename(GBM = Overall.x,
+         PLS = Overall.y,
+         RF = Overall) %>% 
+  dplyr::select(variable, GBM, PLS, RF)
+
+write.table(x = varimp_table, file = "../../output/crop_market_price/models_var_importance.csv", sep = ",", row.names = FALSE)
 ```
 
-Building the ensemble model using `glmnet`.
 
-```{r, message=FALSE}
-set.seed(1234)
+# III. ENSEMBLE METHOD
+The ensemble fitting will be done as a weighted average model using the estimated r squared from the calibration model 
+```{r, echo=FALSE}
+print(paste0("gbm.rsq: ", gbm.rsq))
+print(paste0("pls.rsq: ", pls.rsq))
+print(paste0("rf.rsq: ", rf.rsq))
+```
 
-model.ens <- glm(maize_Unmilled_norm ~
-                   maize_Unmilled_norm.gbm + 
-                   maize_Unmilled_norm.pls +
-                   maize_Unmilled_norm.rf,
-                 data = c.data.ens)
+```{r}
+model.ens <- function(pred.gbm, pred.pls, pred.rf){
+  gbm.rsq <- 0.766998139105605
+  pls.rsq <- 0.689119845264237
+  rf.rsq <- 0.707846789255578
+  return((pred.gbm * gbm.rsq + pred.pls * pls.rsq + pred.rf * rf.rsq)/(gbm.rsq + pls.rsq + rf.rsq))
+}
 
-print(model.ens)
+c.maize_Unmilled_norm.ens <- model.ens(predict(model.gbm), predict(model.pls), predict(model.rf))
 ```
 
 
@@ -227,13 +261,13 @@ plot_fitness(obs = c.data$maize_Unmilled_norm, pred = predict(lm1), name = "Cal:
 plot_fitness(obs = c.data$maize_Unmilled_norm, pred = predict(model.gbm), name = "Cal: GBM")
 plot_fitness(obs = c.data$maize_Unmilled_norm, pred = predict(model.pls), name = "Cal: PLS")
 plot_fitness(obs = c.data$maize_Unmilled_norm, pred = predict(model.rf), name = "Cal: RF")
-plot_fitness(obs = v.data$maize_Unmilled_norm, pred = predict(model.ens), name = "Cal: Ensemble")
+plot_fitness(obs = c.data$maize_Unmilled_norm, pred = c.maize_Unmilled_norm.ens, name = "Cal: Ensemble")
 ```
 
 
 # IV. MODEL VALIDATION
 
-We will use the validation dataset to check the prediction.
+We will use the validation dataset (LSMS) to check the prediction.
 
 ## IV.I Prediction on validation dataset
 ```{r}
@@ -248,12 +282,7 @@ v.maize_Unmilled_norm.pls <- predict(model.pls, newdata = v.data)
 v.maize_Unmilled_norm.rf <- predict(model.rf, newdata = v.data)
 
 #Putting together ensemble results to a table
-v.data.ens <- data.frame(maize_Unmilled_norm.gbm = v.maize_Unmilled_norm.gbm,
-                         maize_Unmilled_norm.pls = v.maize_Unmilled_norm.pls,
-                         maize_Unmilled_norm.rf = v.maize_Unmilled_norm.rf)
-
-#running ensemble model
-v.maize_Unmilled_norm.ens <- predict(model.ens, v.data.ens)
+v.maize_Unmilled_norm.ens <- model.ens(v.maize_Unmilled_norm.gbm, v.maize_Unmilled_norm.pls, v.maize_Unmilled_norm.rf)
 ```
 
 ```{r, echo=FALSE, fig.height=8}
@@ -280,12 +309,8 @@ v2.maize_Unmilled_norm.pls <- predict(model.pls, newdata = LSMS)
 v2.maize_Unmilled_norm.rf <- predict(model.rf, newdata = LSMS)
 
 #Putting together ensemble results to a table
-v2.data.ens <- data.frame(maize_Unmilled_norm.gbm = v2.maize_Unmilled_norm.gbm,
-                          maize_Unmilled_norm.pls = v2.maize_Unmilled_norm.pls,
-                          maize_Unmilled_norm.rf = v2.maize_Unmilled_norm.rf)
+v2.maize_Unmilled_norm.ens <- model.ens(v2.maize_Unmilled_norm.gbm, v2.maize_Unmilled_norm.pls, v2.maize_Unmilled_norm.rf)
 
-#running ensemble model
-v2.maize_Unmilled_norm.ens <- predict(model.ens, v2.data.ens)
 ```
 
 ```{r, echo=FALSE, fig.height=8}
@@ -309,7 +334,7 @@ rmse_table$model <- c("PLS", "GBM", "RF", "ENS")
 rmse_table$`RMSE-Cal` <- c(RMSE(c.data$maize_Unmilled_norm, predict(model.gbm)) %>% round(digits=3),
                            RMSE(c.data$maize_Unmilled_norm, predict(model.pls)) %>% round(digits=3),
                            RMSE(c.data$maize_Unmilled_norm, predict(model.rf)) %>% round(digits=3),
-                           RMSE(c.data$maize_Unmilled_norm, predict(model.ens)) %>% round(digits=3))
+                           RMSE(c.data$maize_Unmilled_norm, c.maize_Unmilled_norm.ens) %>% round(digits=3))
 
 rmse_table$`RMSE-Val` <- c(RMSE(v.data$maize_Unmilled_norm, pred = v.maize_Unmilled_norm.gbm) %>% round(digits=3),
                            RMSE(v.data$maize_Unmilled_norm, pred = v.maize_Unmilled_norm.pls) %>% round(digits=3),
@@ -324,7 +349,7 @@ rmse_table$`RMSE-Val2` <- c(RMSE(LSMS$maize_Unmilled_norm, pred = v2.maize_Unmil
 rmse_table$`r2-Cal` <- c(rsq(c.data$maize_Unmilled_norm, predict(model.gbm)) %>% round(digits=3),
                          rsq(c.data$maize_Unmilled_norm, predict(model.pls)) %>% round(digits=3),
                          rsq(c.data$maize_Unmilled_norm, predict(model.rf)) %>% round(digits=3),
-                         rsq(v.data$maize_Unmilled_norm, predict(model.ens)) %>% round(digits=3))
+                         rsq(c.data$maize_Unmilled_norm, c.maize_Unmilled_norm.ens) %>% round(digits=3))
 
 rmse_table$`r2-Val` <- c(rsq(v.data$maize_Unmilled_norm, pred = v.maize_Unmilled_norm.gbm) %>% round(digits=3),
                          rsq(v.data$maize_Unmilled_norm, pred = v.maize_Unmilled_norm.pls) %>% round(digits=3),
@@ -344,40 +369,49 @@ print(rmse_table)
 
 ```{r, echo=FALSE}
 library(ggpubr)
+ 
 
 g.gbm <- ggplot() + 
   geom_point(aes(x = c.data$maize_Unmilled_norm, y = predict(model.gbm)), alpha = 0.3) +
   theme_classic() + 
-  #xlim(20, 15) + ylim()
+  xlim(-4, 4) + ylim(-4, 4) +
   ggtitle("GBM") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  annotate('text', x = -2.5, y = 4, label = paste0("RMSE==", rmse_table$`RMSE-Cal`[1]), parse = TRUE, size=3)  +
+  annotate('text', x = -2.5, y = 2.5, label = paste0("R^{2}==", rmse_table$`r2-Cal`[1]), parse = TRUE, size=3)  +
   geom_abline(slope = 1, intercept = 0)
 
 g.pls <- ggplot() + 
   geom_point(aes(x = c.data$maize_Unmilled_norm, y = predict(model.pls)), alpha = 0.3) +
   theme_classic() + 
-  #xlim(20, 15) + ylim()
+  xlim(-4, 4) + ylim(-4, 4) +
   ggtitle("PLS") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  annotate('text', x = -2.5, y = 4, label = paste0("RMSE==", rmse_table$`RMSE-Cal`[2]), parse = TRUE, size=3)  +
+  annotate('text', x = -2.5, y = 2.5, label = paste0("R^{2}==", rmse_table$`r2-Cal`[2]), parse = TRUE, size=3)  +
   geom_abline(slope = 1, intercept = 0)
 
 g.rf <- ggplot() + 
   geom_point(aes(x = c.data$maize_Unmilled_norm, y = predict(model.rf)), alpha = 0.3) +
   theme_classic() + 
-  #xlim(20, 15) + ylim()
+  xlim(-4, 4) + ylim(-4, 4) +
   ggtitle("RF") + xlab("Observed maize price") + ylab("Predicted maize price") +
-  geom_abline(slope = 1, intercept = 0)
+  annotate('text', x = -2.5, y = 4, label = paste0("RMSE==", rmse_table$`RMSE-Cal`[3]), parse = TRUE, size=3)  +
+  annotate('text', x = -2.5, y = 2.5, label = paste0("R^{2}==", rmse_table$`r2-Cal`[3]), parse = TRUE, size=3)  +
+ geom_abline(slope = 1, intercept = 0)
 
 g.ens <- ggplot() + 
-  geom_point(aes(x = v.data$maize_Unmilled_norm, y = predict(model.ens)), stroke=0, alpha = 0.3) +
+  geom_point(aes(x = v.data$maize_Unmilled_norm, y = v.maize_Unmilled_norm.ens), stroke=0, alpha = 0.3) +
   theme_classic() + 
-  #xlim(20, 15) + ylim()
+  xlim(-4, 4) + ylim(-4, 4) +
   ggtitle("Ensemble") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  annotate('text', x = -2.5, y = 4, label = paste0("RMSE==", rmse_table$`RMSE-Val`[4]), parse = TRUE, size=3)  +
+  annotate('text', x = -2.5, y = 2.5, label = paste0("R^{2}==", rmse_table$`r2-Val`[4]), parse = TRUE, size=3)  +
   geom_abline(slope = 1, intercept = 0)
 
 
 g <- ggarrange(g.gbm, g.pls, g.rf, g.ens, ncol=2, nrow =2)
 g
 ggexport(g, filename = "../../output/plots/scatterplot_cal.tiff",
-         width = 500, height = 500)
+         width = 400, height = 400)
 ```
 
 
@@ -386,28 +420,28 @@ ggexport(g, filename = "../../output/plots/scatterplot_cal.tiff",
 g.gbm <- ggplot() + 
   geom_point(aes(x = LSMS$maize_Unmilled_norm, y = v2.maize_Unmilled_norm.gbm), alpha = 0.3) +
   theme_classic() + 
-  #xlim(20, 15) + ylim()
+  xlim(-2, 4) + ylim(-4, 4) +
   ggtitle("GBM") + xlab("Observed maize price") + ylab("Predicted maize price") +
   geom_abline(slope = 1, intercept = 0)
 
 g.pls <- ggplot() + 
   geom_point(aes(x = LSMS$maize_Unmilled_norm, y = v2.maize_Unmilled_norm.pls), alpha = 0.3) +
   theme_classic() + 
-  #xlim(20, 15) + ylim()
+  xlim(-2, 4) + ylim(-4, 4) +
   ggtitle("PLS") + xlab("Observed maize price") + ylab("Predicted maize price") +
   geom_abline(slope = 1, intercept = 0)
 
 g.rf <- ggplot() + 
   geom_point(aes(x = LSMS$maize_Unmilled_norm, y = v2.maize_Unmilled_norm.rf), alpha = 0.3) +
   theme_classic() + 
-  #xlim(20, 15) + ylim()
+  xlim(-2, 4) + ylim(-4, 4) +
   ggtitle("RF") + xlab("Observed maize price") + ylab("Predicted maize price") +
   geom_abline(slope = 1, intercept = 0)
 
 g.ens <- ggplot() + 
   geom_point(aes(x = LSMS$maize_Unmilled_norm, y = v2.maize_Unmilled_norm.ens), alpha = 0.3) +
   theme_classic() + 
-  #xlim(20, 15) + ylim()
+  xlim(-2, 4) + ylim(-4, 4) +
   ggtitle("Ensemble") + xlab("Observed maize price") + ylab("Predicted maize price") +
   geom_abline(slope = 1, intercept = 0)
 
