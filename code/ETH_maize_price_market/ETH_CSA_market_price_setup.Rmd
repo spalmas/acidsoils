@@ -186,7 +186,7 @@ CSA_t0_trend <- CSA %>%
   tidyr::pivot_longer(cols = c("barley", "maize", "wheat"), names_to = "crop", values_to = "t0_norm_price")
 
 ggplot(CSA_t0_trend, aes(x=month, y=t0_norm_price, color=crop, fill=crop))+
- stat_summary(aes(y = t0_norm_price, color=crop, group=crop), fun.y=mean, geom="line")
+ stat_summary(aes(y = t0_norm_price, color=crop, group=crop), fun=mean, geom="line")
 
 CSA_t0_trend %>% 
   dplyr::select(-Date) %>% 
@@ -219,9 +219,9 @@ PH <- rast("F:/Work/MarkusStacks/ET_250m_2019/ET_500m_2019_resampled/PH.tif")
 CSA_vect <- terra::project(CSA_vect, crs(PH)[1])
 
 #export vector to use for predictions
-#writeVector(CSA_vect,
-#            filename = "../../data/prices/CSA_market_maize_prices_2016.shp",
-#            overwrite=TRUE)
+writeVector(CSA_vect,
+            filename = "../../data/prices/CSA_market_maize_prices.shp",
+            overwrite=TRUE)
 ```
 
 Changing the coordinates in the table to the correct projection
@@ -249,6 +249,7 @@ Meher_Belg <- rast("../../data/Meher_Belg_Regions/Meher_Belg_Regions.tif")
 
 CSA <- cbind(CSA,
              terra::extract(Meher_Belg, CSA_vect,drop=TRUE))
+CSA$ID <- NULL  #extract adds an ID column that is very annoying
 ```
 
 
@@ -532,7 +533,7 @@ CSA <- cbind(CSA, results)
 # IV. SELECTING VARIABLES TO USE IN THE PREDICTION
 ```{r}
 CSA_barley <- CSA %>%
-  filter(!is.na(barley_unmilled_White_norm)) %>%
+  dplyr::filter(!is.na(barley_unmilled_White_norm)) %>%
   dplyr::select(barley_unmilled_White_norm,
                 barley_unmilled_White_norm_t0,
                 Month_code, Longitude, Latitude,
@@ -545,7 +546,7 @@ CSA_barley <- CSA %>%
                 #meher_rainfall_seas, belg_rainfall_seas, meher_wheat_rainfall_seas,
                 #lagrainfall3, lagrainfall6,
                 Region, Year) %>% 
-  filter(complete.cases(.))
+  dplyr::filter(complete.cases(.))
 
 CSA_maize <- CSA %>% 
   filter(!is.na(maize_Unmilled_norm)) %>%

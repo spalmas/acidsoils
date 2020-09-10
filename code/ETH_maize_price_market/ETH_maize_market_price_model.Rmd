@@ -399,12 +399,12 @@ g.rf <- ggplot() +
  geom_abline(slope = 1, intercept = 0)
 
 g.ens <- ggplot() + 
-  geom_point(aes(x = v.data$maize_Unmilled_norm, y = v.maize_Unmilled_norm.ens), stroke=0, alpha = 0.3) +
+  geom_point(aes(x = c.data$maize_Unmilled_norm, y = c.maize_Unmilled_norm.ens), stroke=0, alpha = 0.3) +
   theme_classic() + 
   xlim(-4, 4) + ylim(-4, 4) +
   ggtitle("Ensemble") + xlab("Observed maize price") + ylab("Predicted maize price") +
-  annotate('text', x = -2.5, y = 4, label = paste0("RMSE==", rmse_table$`RMSE-Val`[4]), parse = TRUE, size=3)  +
-  annotate('text', x = -2.5, y = 2.5, label = paste0("R^{2}==", rmse_table$`r2-Val`[4]), parse = TRUE, size=3)  +
+  annotate('text', x = -2.5, y = 4, label = paste0("RMSE==", rmse_table$`RMSE-Cal`[4]), parse = TRUE, size=3)  +
+  annotate('text', x = -2.5, y = 2.5, label = paste0("R^{2}==", rmse_table$`r2-Cal`[4]), parse = TRUE, size=3)  +
   geom_abline(slope = 1, intercept = 0)
 
 
@@ -415,41 +415,95 @@ ggexport(g, filename = "../../output/plots/scatterplot_cal.tiff",
 ```
 
 
-
 ```{r}
 g.gbm <- ggplot() + 
-  geom_point(aes(x = LSMS$maize_Unmilled_norm, y = v2.maize_Unmilled_norm.gbm), alpha = 0.3) +
+  geom_point(aes(x = v.data$maize_Unmilled_norm, y = v.maize_Unmilled_norm.gbm), alpha = 0.3) +
   theme_classic() + 
-  xlim(-2, 4) + ylim(-4, 4) +
+  xlim(-4, 4) + ylim(-4, 4) +
   ggtitle("GBM") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  annotate('text', x = -2.5, y = 4, label = paste0("RMSE==", rmse_table$`RMSE-Val`[1]), parse = TRUE, size=3)  +
+  annotate('text', x = -2.5, y = 2.5, label = paste0("R^{2}==", rmse_table$`r2-Val`[1]), parse = TRUE, size=3)  +
   geom_abline(slope = 1, intercept = 0)
 
 g.pls <- ggplot() + 
-  geom_point(aes(x = LSMS$maize_Unmilled_norm, y = v2.maize_Unmilled_norm.pls), alpha = 0.3) +
+  geom_point(aes(x = v.data$maize_Unmilled_norm, y = v.maize_Unmilled_norm.pls), alpha = 0.3) +
   theme_classic() + 
-  xlim(-2, 4) + ylim(-4, 4) +
+  xlim(-4, 4) + ylim(-4, 4) +
   ggtitle("PLS") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  annotate('text', x = -2.5, y = 4, label = paste0("RMSE==", rmse_table$`RMSE-Val`[2]), parse = TRUE, size=3)  +
+  annotate('text', x = -2.5, y = 2.5, label = paste0("R^{2}==", rmse_table$`r2-Val`[2]), parse = TRUE, size=3)  +
   geom_abline(slope = 1, intercept = 0)
 
 g.rf <- ggplot() + 
-  geom_point(aes(x = LSMS$maize_Unmilled_norm, y = v2.maize_Unmilled_norm.rf), alpha = 0.3) +
+  geom_point(aes(x = v.data$maize_Unmilled_norm, y = v.maize_Unmilled_norm.rf), alpha = 0.3) +
   theme_classic() + 
-  xlim(-2, 4) + ylim(-4, 4) +
+  xlim(-4, 4) + ylim(-4, 4) +
   ggtitle("RF") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  annotate('text', x = -2.5, y = 4, label = paste0("RMSE==", rmse_table$`RMSE-Val`[3]), parse = TRUE, size=3)  +
+  annotate('text', x = -2.5, y = 2.5, label = paste0("R^{2}==", rmse_table$`r2-Val`[3]), parse = TRUE, size=3)  +
   geom_abline(slope = 1, intercept = 0)
 
 g.ens <- ggplot() + 
-  geom_point(aes(x = LSMS$maize_Unmilled_norm, y = v2.maize_Unmilled_norm.ens), alpha = 0.3) +
+  geom_point(aes(x = v.data$maize_Unmilled_norm, y = v.maize_Unmilled_norm.ens), alpha = 0.3) +
   theme_classic() + 
-  xlim(-2, 4) + ylim(-4, 4) +
+  xlim(-4, 4) + ylim(-4, 4) +
   ggtitle("Ensemble") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  annotate('text', x = -2.5, y = 4, label = paste0("RMSE==", rmse_table$`RMSE-Val`[4]), parse = TRUE, size=3)  +
+  annotate('text', x = -2.5, y = 2.5, label = paste0("R^{2}==", rmse_table$`r2-Val`[4]), parse = TRUE, size=3)  +
   geom_abline(slope = 1, intercept = 0)
 
 
 g <- ggarrange(g.gbm, g.pls, g.rf, g.ens, ncol=2, nrow =2)
 g
 
-ggexport(g, filename = "../../output/plots/scatterplot_val.tiff",
+ggexport(g, filename = "../../output/plots/scatterplot_val1.tiff",
+         width = 500, height = 500)
+```
+
+
+
+```{r}
+g.gbm <- ggplot() + 
+  geom_point(aes(x = LSMS$maize_Unmilled_norm, y = v2.maize_Unmilled_norm.gbm), alpha = 0.3) +
+  theme_classic() + 
+  xlim(-4, 4) + ylim(-4, 4) +
+  ggtitle("GBM") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  annotate('text', x = -2.5, y = 4, label = paste0("RMSE==", rmse_table$`RMSE-Val2`[1]), parse = TRUE, size=3)  +
+  annotate('text', x = -2.5, y = 2.5, label = paste0("R^{2}==", rmse_table$`r2-Val2`[1]), parse = TRUE, size=3)  +
+  geom_abline(slope = 1, intercept = 0)
+
+g.pls <- ggplot() + 
+  geom_point(aes(x = LSMS$maize_Unmilled_norm, y = v2.maize_Unmilled_norm.pls), alpha = 0.3) +
+  theme_classic() + 
+  xlim(-4, 4) + ylim(-4, 4) +
+  ggtitle("PLS") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  annotate('text', x = -2.5, y = 4, label = paste0("RMSE==", rmse_table$`RMSE-Val2`[2]), parse = TRUE, size=3)  +
+  annotate('text', x = -2.5, y = 2.5, label = paste0("R^{2}==", rmse_table$`r2-Val2`[2]), parse = TRUE, size=3)  +
+  geom_abline(slope = 1, intercept = 0)
+
+g.rf <- ggplot() + 
+  geom_point(aes(x = LSMS$maize_Unmilled_norm, y = v2.maize_Unmilled_norm.rf), alpha = 0.3) +
+  theme_classic() + 
+  xlim(-4, 4) + ylim(-4, 4) +
+  ggtitle("RF") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  annotate('text', x = -2.5, y = 4, label = paste0("RMSE==", rmse_table$`RMSE-Val2`[3]), parse = TRUE, size=3)  +
+  annotate('text', x = -2.5, y = 2.5, label = paste0("R^{2}==", rmse_table$`r2-Val2`[3]), parse = TRUE, size=3)  +
+  geom_abline(slope = 1, intercept = 0)
+
+g.ens <- ggplot() + 
+  geom_point(aes(x = LSMS$maize_Unmilled_norm, y = v2.maize_Unmilled_norm.ens), alpha = 0.3) +
+  theme_classic() + 
+  xlim(-4, 4) + ylim(-4, 4) +
+  ggtitle("Ensemble") + xlab("Observed maize price") + ylab("Predicted maize price") +
+  annotate('text', x = -2.5, y = 4, label = paste0("RMSE==", rmse_table$`RMSE-Val2`[4]), parse = TRUE, size=3)  +
+  annotate('text', x = -2.5, y = 2.5, label = paste0("R^{2}==", rmse_table$`r2-Val2`[4]), parse = TRUE, size=3)  +
+  geom_abline(slope = 1, intercept = 0)
+
+
+g <- ggarrange(g.gbm, g.pls, g.rf, g.ens, ncol=2, nrow =2)
+g
+
+ggexport(g, filename = "../../output/plots/scatterplot_val2.tiff",
          width = 500, height = 500)
 ```
 

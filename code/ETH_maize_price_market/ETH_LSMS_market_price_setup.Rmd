@@ -26,7 +26,7 @@ library(terra)
 
 
 # I. Preparing LSMS market price data
-This data is made up of maize prices collectted at various locations across Ethiopia in the 2015-2016 LSMS data. To create this shapefile, we 1) calculate prices in ETB/kg and correcting for the many inaccuracies found in LSMS. 2) Convert all prices to USD/kg using 2016 exchange rate. 3) joining coordinates and 4) creating and saving the shapefile.
+This data is made up of maize prices collected at various locations across Ethiopia in the 2015-2016 LSMS data. To create this shapefile, we 1) calculate prices in ETB/kg and correcting for the many inaccuracies found in LSMS. 2) Convert all prices to USD/kg using 2016 exchange rate. 3) joining coordinates and 4) creating and saving the shapefile.
 
 This is the LSMS raw data.
 ```{r }
@@ -88,8 +88,6 @@ The model predicts de-trended normalized values. I change these here.
 ```{r}
 LSMS_maize$maize_Unmilled_norm <- (LSMS_maize$maip_ETBkg - mean(LSMS_maize$maip_ETBkg, na.rm=TRUE))/sd(LSMS_maize$maip_ETBkg, na.rm=TRUE)
 ```
-
-
 
 ```{r, echo=FALSE}
 #Final distribution in USD/kg
@@ -229,6 +227,10 @@ LSMS_maize$rainfall_season <- values
 We'll assume that all sales were made in January.
 ```{r}
 LSMS_maize$Month_code <- 1  #January
+```
+
+Since there isn't any data on market prices for previous months for those points, we need to add it in another way. Since LSMS data was measured iun 2014-2015, one option is to use the market price for 2013 or 2014 that was measured in the CSA data. Obviously, the coordinates do not match, therefore, I will use the CSA market price closest to the point measured in the LSMS.
+```{r}
 LSMS_maize$maize_Unmilled_norm_t0 <- 0 #Previous month untrended stamdardized price
 ```
 
